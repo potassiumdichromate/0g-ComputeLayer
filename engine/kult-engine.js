@@ -62,6 +62,13 @@
     return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   }
 
+  function alpha(hex, a) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+  }
+
   // ------------------------------------------------------------------- style
   const DEFAULT_STYLE = {
     font: '"Trebuchet MS", "Segoe UI", system-ui, sans-serif',
@@ -69,6 +76,13 @@
     outlineWidth: 3,
     radius: 8,
     deco: "stars",
+    // Web fonts: a display face for titles/numbers and a UI face for labels.
+    // Loaded from Google Fonts; `font` above is the fallback stack.
+    fonts: {
+      display: "Lilita One", displayWeight: "400",
+      ui: "Nunito", uiWeight: "800",
+      google: "family=Lilita+One&family=Nunito:wght@700;800;900"
+    },
     palette: {
       bg1: "#1a1446", bg2: "#3a1d6e", primary: "#ffcf3f", secondary: "#38d6ff",
       accent: "#ff4f9a", danger: "#ff5a4f", good: "#5dff8f", text: "#ffffff"
@@ -297,23 +311,16 @@
       const py = ((clientY - rect.top) * canvas.height) / Math.max(1, rect.height);
       return { x: (px - view.ox) / view.scale, y: (py - view.oy) / view.scale };
     }
-    function uiButtons() {
-      return [
-        { id: "pause", x: view.W - 26, y: 26, r: 17 },
-        { id: "mute", x: view.W - 66, y: 26, r: 17 }
-      ];
-    }
     function pointerDown(p) {
       audio.unlock();
-      if (state === "play" || state === "paused") {
-        for (const b of uiButtons()) {
-          if (Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 6) {
-            if (b.id === "mute") audio.toggle();
-            else setState(state === "paused" ? "play" : "paused");
-            return;
-          }
-        }
+      const id = hitButton(p);
+      if (id) {
+        ui.pressFx[id] = 0.16;
+        // Buttons with an action consume the press; the big PLAY / PLAY AGAIN
+        // buttons fall through so "tap anywhere" keeps working.
+        if (UI_ACTIONS[id]) { audio.play("click"); UI_ACTIONS[id](); return; }
       }
+      if (state === "play" && config.touchRipples !== false) ui.ripples.push({ x: p.x, y: p.y, t: 0 });
       input.x = p.x; input.y = p.y;
       input.down = true; input.pressed = true;
       input.startX = p.x; input.startY = p.y; input.startT = now();
@@ -880,25 +887,82 @@
       }
       ctx.restore();
     }
+    // ============================================================== UI kit
+    // Everything the player sees outside the game world: typography, HUD,
+    // menus, buttons, transitions. Drawn on the canvas so it scales with the
+    // game, shows up in playtest screenshots, and works in any sandbox.
+    const fonts = Object.assign({}, DEFAULT_STYLE.fonts, style.fonts || {});
+    const FONT_DISPLAY = '"' + fonts.display + '", ' + style.font;
+    const FONT_UI = '"' + fonts.ui + '", ' + style.font;
+    const ui = { hits: [], pressFx: {}, scoreBump: 0, shownScore: 0, lastScore: 0, fade: 0, ripples: [], newBest: false, titleCache: null, time: 0, fontEpoch: 0 };
+
+    function loadFonts() {
+      try {
+        if (!fonts.google || root.__KULT_NO_WEBFONTS__ || !doc.head || !doc.createElement) return;
+        const link = doc.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "https://fonts.googleapis.com/css2?" + fonts.google + "&display=swap";
+        // @font-face files only download when something asks for them; ask now
+        // so the first menu frames already use the real fonts.
+        link.onload = () => {
+          if (!doc.fonts || !doc.fonts.load) return;
+          // Text measured with fallback metrics (cached title layout) must be
+          // re-measured once the real faces are in.
+          Promise.all([
+            doc.fonts.load(fonts.displayWeight + ' 40px "' + fonts.display + '"'),
+            doc.fonts.load(fonts.uiWeight + ' 16px "' + fonts.ui + '"')
+          ]).then(() => { ui.fontEpoch += 1; }, () => {});
+        };
+        doc.head.appendChild(link);
+      } catch (e) { /* fallback fonts are fine */ }
+    }
+    function buzz(pattern) {
+      if (config.haptics === false) return;
+      try { if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(pattern); } catch (e) { /* unsupported */ }
+    }
+
+    function setFont(o) {
+      const display = o.font === "display";
+      const family = display ? FONT_DISPLAY : (o.font && o.font !== "ui" ? o.font : FONT_UI);
+      const weight = o.weight || (display ? fonts.displayWeight : fonts.uiWeight);
+      ctx.font = weight + " " + Math.round(o.size || 18) + "px " + family;
+    }
+    // Outlined text. Options: size, color, align, baseline, font ("display" |
+    // "ui" | CSS family), weight, gradient [top, bottom], stroke, shadow.
     function text(str, x, y, o) {
       o = o || {};
-      ctx.font = (o.weight || "800") + " " + (o.size || 18) + "px " + (o.font || style.font);
+      str = String(str);
+      const size = o.size || 18;
+      setFont(o);
       ctx.textAlign = o.align || "left";
       ctx.textBaseline = o.baseline || "alphabetic";
-      // UI text is always light-on-dark-outline so it reads on any palette or
-      // background (a palette's own text/outline colors can be dark or white).
-      if (o.stroke !== false) {
-        ctx.lineWidth = Math.max(2, (o.size || 18) / 5);
-        ctx.strokeStyle = o.strokeColor || "rgba(14,10,32,0.92)";
-        ctx.lineJoin = "round";
-        ctx.strokeText(String(str), x, y);
+      ctx.lineJoin = "round";
+      const strokeW = Math.max(2, size / (size >= 22 ? 4.5 : 5));
+      if (o.shadow !== false && size >= 22) {
+        const dy = Math.max(2, size * 0.08);
+        ctx.fillStyle = "rgba(8,6,24,0.5)";
+        ctx.strokeStyle = "rgba(8,6,24,0.5)";
+        if (o.stroke !== false) { ctx.lineWidth = strokeW; ctx.strokeText(str, x, y + dy); }
+        ctx.fillText(str, x, y + dy);
       }
-      ctx.fillStyle = colorOf(o.color, "#ffffff");
-      ctx.fillText(String(str), x, y);
+      if (o.stroke !== false) {
+        ctx.lineWidth = strokeW;
+        ctx.strokeStyle = o.strokeColor || "rgba(14,10,32,0.92)";
+        ctx.strokeText(str, x, y);
+      }
+      if (o.gradient) {
+        const middle = ctx.textBaseline === "middle";
+        const gr = ctx.createLinearGradient(0, middle ? y - size * 0.5 : y - size * 0.8, 0, middle ? y + size * 0.45 : y);
+        gr.addColorStop(0, colorOf(o.gradient[0])); gr.addColorStop(1, colorOf(o.gradient[1]));
+        ctx.fillStyle = gr;
+      } else {
+        ctx.fillStyle = colorOf(o.color, "#ffffff");
+      }
+      ctx.fillText(str, x, y);
     }
-    function wrapLines(str, maxWidth, size) {
-      ctx.font = "800 " + size + "px " + style.font;
-      const words = String(str).split(/\s+/);
+    function wrapLines(str, maxWidth, size, font) {
+      setFont({ size, font: font || "ui" });
+      const words = String(str).split(/\s+/).filter(Boolean);
       const lines = [];
       let line = "";
       for (const w of words) {
@@ -908,95 +972,360 @@
       if (line) lines.push(line);
       return lines.slice(0, 3);
     }
+    function fitText(str, maxWidth, size, font, min) {
+      for (let s = size; s > (min || 12); s -= 1) {
+        setFont({ size: s, font });
+        if (ctx.measureText(str).width <= maxWidth) return s;
+      }
+      return min || 12;
+    }
+    function fitTitle(str, maxW, maxH) {
+      const key = str + "|" + maxW + "|" + maxH + "|" + ui.fontEpoch;
+      if (ui.titleCache && ui.titleCache.key === key) return ui.titleCache;
+      let best = null;
+      for (let size = 56; size >= 22; size -= 2) {
+        const lines = wrapLines(str, maxW, size, "display");
+        setFont({ size, font: "display" });
+        const widest = Math.max.apply(null, lines.map((l) => ctx.measureText(l).width));
+        if (widest <= maxW && lines.length * size * 1.04 <= maxH) { best = { lines, size }; break; }
+      }
+      best = best || { lines: wrapLines(str, maxW, 22, "display"), size: 22 };
+      ui.titleCache = Object.assign({ key }, best);
+      return ui.titleCache;
+    }
+
+    function glass(x, y, w, h, r, o) {
+      o = o || {};
+      roundRect(x, y, w, h, r);
+      ctx.fillStyle = o.fill || "rgba(12,9,32,0.46)";
+      ctx.fill();
+      ctx.lineWidth = o.lineWidth || 1.5;
+      ctx.strokeStyle = o.stroke || "rgba(255,255,255,0.22)";
+      ctx.stroke();
+    }
+    function icon(name, x, y, s, color) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(s / 24, s / 24);
+      const c = color || "#ffffff";
+      ctx.fillStyle = c; ctx.strokeStyle = c;
+      ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      if (name === "pause") {
+        roundRect(-7, -8, 5, 16, 1.5); ctx.fill(); roundRect(2, -8, 5, 16, 1.5); ctx.fill();
+      } else if (name === "play") {
+        ctx.beginPath(); ctx.moveTo(-6, -9); ctx.lineTo(9, 0); ctx.lineTo(-6, 9); ctx.closePath(); ctx.fill();
+      } else if (name === "sound" || name === "muted") {
+        ctx.beginPath(); ctx.moveTo(-10, -4); ctx.lineTo(-5, -4); ctx.lineTo(1, -10); ctx.lineTo(1, 10); ctx.lineTo(-5, 4); ctx.lineTo(-10, 4); ctx.closePath(); ctx.fill();
+        if (name === "sound") {
+          ctx.lineWidth = 2.4;
+          ctx.beginPath(); ctx.arc(2, 0, 5, -0.8, 0.8); ctx.stroke();
+          ctx.beginPath(); ctx.arc(2, 0, 10, -0.8, 0.8); ctx.stroke();
+        } else {
+          ctx.strokeStyle = pal.danger; ctx.lineWidth = 2.6;
+          ctx.beginPath(); ctx.moveTo(5, -5); ctx.lineTo(12, 5); ctx.moveTo(12, -5); ctx.lineTo(5, 5); ctx.stroke();
+        }
+      } else if (name === "restart") {
+        ctx.beginPath(); ctx.arc(0, 0, 8, -Math.PI * 0.3, Math.PI * 1.4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(2, -13); ctx.lineTo(10, -7); ctx.lineTo(1, -3); ctx.closePath(); ctx.fill();
+      } else if (name === "home") {
+        ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(0, -9); ctx.lineTo(10, 0); ctx.stroke();
+        roundRect(-6, -2, 12, 11, 1.5); ctx.fill();
+      } else if (name === "trophy") {
+        ctx.beginPath(); ctx.moveTo(-7, -9); ctx.lineTo(7, -9); ctx.lineTo(6, -1); ctx.quadraticCurveTo(0, 6, -6, -1); ctx.closePath(); ctx.fill();
+        ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.arc(-7, -5, 3.5, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();
+        ctx.beginPath(); ctx.arc(7, -5, 3.5, -Math.PI * 0.5, Math.PI * 0.5); ctx.stroke();
+        ctx.fillRect(-1.5, 2, 3, 5); roundRect(-6, 7, 12, 3.5, 1); ctx.fill();
+      } else if (name === "star") {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i += 1) {
+          const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 4.5 : 11;
+          ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        ctx.closePath(); ctx.fill();
+      } else if (name === "clock") {
+        ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -5); ctx.moveTo(0, 0); ctx.lineTo(4, 2); ctx.stroke();
+      } else if (name === "tap") {
+        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.globalAlpha *= 0.7; ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha *= 0.5; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // A chunky, pressable button. Registers a hit box for the current state
+    // (or o.states); ids in UI_ACTIONS act on press, others act like a tap.
+    function button(id, cx, cy, w, h, o) {
+      o = o || {};
+      const k = (o.scale != null ? o.scale : 1) * (ui.pressFx[id] > 0 ? 0.93 : 1);
+      if (k <= 0.01) return;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(k, k);
+      const r = o.radius != null ? o.radius : h / 2;
+      if (o.variant === "glass") {
+        glass(-w / 2, -h / 2, w, h, r);
+      } else {
+        const base = colorOf(o.color || "accent");
+        roundRect(-w / 2, -h / 2 + 5, w, h, r);
+        ctx.fillStyle = shade(base, -0.45); ctx.fill();
+        roundRect(-w / 2, -h / 2, w, h, r);
+        const gr = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+        gr.addColorStop(0, shade(base, 0.2)); gr.addColorStop(1, shade(base, -0.12));
+        ctx.fillStyle = gr; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(14,10,32,0.9)"; ctx.stroke();
+        ctx.save();
+        roundRect(-w / 2, -h / 2, w, h, r); ctx.clip();
+        ctx.fillStyle = "rgba(255,255,255,0.24)";
+        roundRect(-w / 2 + 7, -h / 2 + 4, w - 14, h * 0.34, Math.max(2, r * 0.6)); ctx.fill();
+        if (o.shimmer) {
+          const sx = ((ui.time * 0.5) % 1.8) * (w + 120) - w / 2 - 60;
+          ctx.globalAlpha = 0.32; ctx.fillStyle = "#ffffff";
+          ctx.beginPath(); ctx.moveTo(sx, -h / 2); ctx.lineTo(sx + 28, -h / 2); ctx.lineTo(sx + 6, h / 2); ctx.lineTo(sx - 22, h / 2); ctx.closePath(); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+      }
+      const want = o.size || Math.round(h * 0.42);
+      if (o.label) {
+        // Shrink the label (and its icon) until it fits inside the button.
+        let size = want;
+        for (; size > 10; size -= 1) {
+          setFont({ font: o.font || "display", size });
+          if (ctx.measureText(o.label).width + (o.icon ? size + 8 : 0) <= w - 30) break;
+        }
+        setFont({ font: o.font || "display", size });
+        const tw = ctx.measureText(o.label).width;
+        const iw = o.icon ? size + 8 : 0;
+        let x0 = -(tw + iw) / 2;
+        if (o.icon) { icon(o.icon, x0 + size / 2, 0, size * 1.05); x0 += iw; }
+        text(o.label, x0, 1, { font: o.font || "display", size, baseline: "middle", shadow: false });
+      } else if (o.icon) {
+        icon(o.icon, 0, 0, o.iconSize || h * 0.55);
+      }
+      ctx.restore();
+      if (o.hit !== false) ui.hits.push({ id, x: cx - (w * k) / 2, y: cy - (h * k) / 2, w: w * k, h: h * k, states: o.states || [state] });
+    }
+    function chip(str, x, y, o) {
+      o = o || {};
+      const size = o.size || 12;
+      setFont({ size });
+      const tw = ctx.measureText(str).width;
+      const iw = o.icon ? size + 6 : 0;
+      const w = o.width || tw + iw + 22, h = size + 14;
+      const left = o.align === "left" ? x : x - w / 2;
+      glass(left, y - h / 2, w, h, h / 2, { fill: o.fill });
+      const start = o.width ? left + (w - tw - iw) / 2 : left + 11;
+      if (o.icon) icon(o.icon, start + size / 2, y, size + 2, o.color ? colorOf(o.color) : "#ffffff");
+      text(str, start + iw, y + 1, { size, baseline: "middle", color: o.color, stroke: false, shadow: false });
+      return w;
+    }
+    function ribbon(cx, cy, w, h, color) {
+      const tail = 24;
+      for (const s of [-1, 1]) {
+        const x0 = cx + s * (w / 2 - 12), x1 = cx + s * (w / 2 + tail);
+        ctx.beginPath();
+        ctx.moveTo(x0, cy - h / 2 + 10); ctx.lineTo(x1, cy - h / 2 + 10); ctx.lineTo(x1 - s * 12, cy + 8);
+        ctx.lineTo(x1, cy + h / 2 + 8); ctx.lineTo(x0, cy + h / 2 + 8); ctx.closePath();
+        ctx.fillStyle = shade(color, -0.42); ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(14,10,32,0.9)"; ctx.stroke();
+      }
+      roundRect(cx - w / 2, cy - h / 2, w, h, 12);
+      const gr = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
+      gr.addColorStop(0, shade(color, 0.18)); gr.addColorStop(1, shade(color, -0.12));
+      ctx.fillStyle = gr; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(14,10,32,0.9)"; ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.2)";
+      roundRect(cx - w / 2 + 8, cy - h / 2 + 4, w - 16, h * 0.3, 6); ctx.fill();
+    }
     function heart(x, y, s, filled) {
       ctx.save(); ctx.translate(x, y); ctx.scale(s / 16, s / 16);
       ctx.beginPath();
-      ctx.moveTo(0, 5); ctx.bezierCurveTo(-8, -2, -7, -9, 0, -5); ctx.bezierCurveTo(7, -9, 8, -2, 0, 5);
+      ctx.moveTo(0, 6); ctx.bezierCurveTo(-9, -1, -7, -10, 0, -5); ctx.bezierCurveTo(7, -10, 9, -1, 0, 6);
       ctx.closePath();
-      ctx.fillStyle = filled ? pal.danger : "rgba(255,255,255,0.18)"; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = style.outline; ctx.stroke();
+      ctx.fillStyle = filled ? pal.danger : "rgba(255,255,255,0.14)"; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(14,10,32,0.9)"; ctx.stroke();
+      if (filled) { ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.beginPath(); ctx.ellipse(-3.2, -3.6, 1.8, 1.2, -0.6, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
     }
+    function overlay(a) {
+      ctx.fillStyle = "rgba(8,6,20," + a + ")";
+      ctx.fillRect(-10, -10, view.W + 20, view.H + 20);
+    }
+    function drawHero(x, y, size) {
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.beginPath(); ctx.ellipse(x, y + size * 0.62, size * 0.38, size * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+      if (assets.ready("player")) {
+        const a = assets.aspect("player");
+        const w = a >= 1 ? size : size * a, h = a >= 1 ? size / a : size;
+        ctx.drawImage(assets.get("player"), x - w / 2, y - h / 2, w, h);
+        return;
+      }
+      ctx.save(); ctx.translate(x, y);
+      drawShape({ shape: "blob", face: true, flipX: false }, size * 0.8, size * 0.8, pal.primary);
+      ctx.restore();
+    }
+
+    // ----------------------------------------------------------------- HUD
     function drawHud() {
       if (config.hud === false) return;
       const hud = config.hud || {};
-      text(String(g.score), 16, 40, { size: 30 });
-      text("BEST " + Math.max(g.best, g.score), 18, 60, { size: 12, color: "rgba(255,255,255,0.8)" });
-      let y = 80;
+      const W = view.W;
+      const bump = 1 + ui.scoreBump * 0.3;
+      ctx.save(); ctx.translate(W / 2, 40); ctx.scale(bump, bump);
+      text(String(ui.shownScore), 0, 0, { font: "display", size: 40, align: "center", baseline: "middle", gradient: ["#ffffff", shade(pal.primary, 0.3)] });
+      ctx.restore();
+      if (g.best > 0) chip("BEST " + Math.max(g.best, g.score), W / 2, 74, { icon: "trophy", size: 11, color: g.score > g.best ? pal.primary : null });
+      let y = 30;
       if (hud.lives !== false && g.maxLives > 0) {
-        for (let i = 0; i < Math.min(g.maxLives, 8); i += 1) heart(24 + i * 22, y - 4, 18, i < g.lives);
-        y += 24;
+        const n = Math.min(g.maxLives, 6);
+        glass(12, y - 16, 16 + n * 22, 32, 16);
+        for (let i = 0; i < n; i += 1) heart(31 + i * 22, y, 18, i < g.lives);
+        y += 38;
       }
-      if (hud.level) { text("LEVEL " + g.level, 16, y, { size: 13, color: pal.secondary }); y += 18; }
-      for (const key of Object.keys(hudValues)) { text(key + ": " + hudValues[key], 16, y, { size: 13 }); y += 18; }
-      for (const b of uiButtons()) {
-        ctx.fillStyle = "rgba(0,0,0,0.32)";
-        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
-        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.stroke();
-        ctx.fillStyle = "#ffffff";
-        if (b.id === "pause") {
-          if (state === "paused") { ctx.beginPath(); ctx.moveTo(b.x - 4, b.y - 7); ctx.lineTo(b.x + 7, b.y); ctx.lineTo(b.x - 4, b.y + 7); ctx.fill(); }
-          else { ctx.fillRect(b.x - 6, b.y - 7, 4, 14); ctx.fillRect(b.x + 2, b.y - 7, 4, 14); }
-        } else {
-          ctx.beginPath(); ctx.moveTo(b.x - 8, b.y - 3); ctx.lineTo(b.x - 4, b.y - 3); ctx.lineTo(b.x + 1, b.y - 8); ctx.lineTo(b.x + 1, b.y + 8); ctx.lineTo(b.x - 4, b.y + 3); ctx.lineTo(b.x - 8, b.y + 3); ctx.fill();
-          if (audio.muted) { ctx.strokeStyle = pal.danger; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(b.x + 4, b.y - 5); ctx.lineTo(b.x + 10, b.y + 5); ctx.moveTo(b.x + 10, b.y - 5); ctx.lineTo(b.x + 4, b.y + 5); ctx.stroke(); }
-          else { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.arc(b.x + 2, b.y, 6, -0.9, 0.9); ctx.stroke(); }
-        }
+      if (hud.level) { chip("LV " + g.level, 12, y, { align: "left", size: 12, color: pal.secondary }); y += 32; }
+      for (const key of Object.keys(hudValues)) { chip(key + "  " + hudValues[key], 12, y, { align: "left", size: 12 }); y += 32; }
+      button("pause", W - 30, 30, 40, 40, { variant: "glass", icon: "pause", radius: 12, states: ["play"] });
+      button("mute", W - 76, 30, 40, 40, { variant: "glass", icon: audio.muted ? "muted" : "sound", radius: 12, states: ["play"] });
+      if (comboState.n >= 3) {
+        const mult = Math.min(8, 1 + Math.floor(comboState.n / 3));
+        const pulse = 1 + Math.sin(ui.time * 12) * 0.05;
+        ctx.save(); ctx.translate(W - 54, 76); ctx.scale(pulse, pulse);
+        glass(-44, -15, 88, 30, 15, { fill: alpha(shade(pal.accent, -0.3), 0.85), stroke: alpha(pal.accent, 0.9) });
+        text("x" + mult + " COMBO", 0, -1, { font: "display", size: 14, align: "center", baseline: "middle", color: pal.primary, shadow: false });
+        ctx.fillStyle = pal.primary;
+        roundRect(-34, 8, 68 * clamp(comboState.t / 1.6, 0, 1), 3, 1.5); ctx.fill();
+        ctx.restore();
       }
-    }
-    function overlay(alpha) {
-      ctx.fillStyle = "rgba(8,6,20," + alpha + ")";
-      ctx.fillRect(-10, -10, view.W + 20, view.H + 20);
-    }
-    function drawMenu(t) {
-      const W = view.W, H = view.H;
-      overlay(0.45);
-      const title = PKG.title || config.title || "Play"; // the saved title wins (creators rename games)
-      const lines = wrapLines(title.toUpperCase(), W - 50, 40);
-      const bounce = Math.sin(t * 2.2) * 4;
-      lines.forEach((line, i) => text(line, W / 2, H * 0.3 + i * 46 + bounce, { size: 40, align: "center", color: pal.primary }));
-      if (config.subtitle) text(config.subtitle, W / 2, H * 0.3 + lines.length * 46 + 6, { size: 15, align: "center", color: pal.secondary });
-      const pulse = 1 + Math.sin(t * 5) * 0.06;
-      ctx.save(); ctx.translate(W / 2, H * 0.62); ctx.scale(pulse, pulse);
-      ctx.fillStyle = pal.accent; roundRect(-92, -26, 184, 52, 26); ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = style.outline; ctx.stroke();
-      text("TAP TO PLAY", 0, 7, { size: 20, align: "center" });
-      ctx.restore();
-      const hint = config.hint || (PKG.gameplay && PKG.gameplay.controls) || "";
-      if (hint) wrapLines(hint, W - 60, 13).forEach((l, i) => text(l, W / 2, H * 0.74 + i * 18, { size: 13, align: "center", weight: "600", color: "rgba(255,255,255,0.85)" }));
-      if (g.best > 0) text("BEST " + g.best, W / 2, H * 0.86, { size: 15, align: "center", color: pal.primary });
-    }
-    function drawOver() {
-      const W = view.W, H = view.H;
-      const k = EASE.back(clamp(stateT / 0.45, 0, 1));
-      overlay(0.55 * Math.min(1, stateT / 0.3));
-      ctx.save(); ctx.translate(W / 2, H * 0.44); ctx.scale(k, k);
-      ctx.fillStyle = "rgba(20,16,44,0.92)"; roundRect(-140, -120, 280, 250, 22); ctx.fill();
-      ctx.lineWidth = 4; ctx.strokeStyle = g.won ? pal.good : pal.accent; ctx.stroke();
-      text(g.overTitle || (g.won ? "YOU WIN!" : "GAME OVER"), 0, -70, { size: 32, align: "center", color: g.won ? pal.good : pal.danger });
-      const shown = Math.round(g.score * clamp(stateT / 0.8, 0, 1));
-      text(String(shown), 0, 0, { size: 54, align: "center" });
-      text("SCORE", 0, 22, { size: 12, align: "center", color: "rgba(255,255,255,0.7)" });
-      if (g.score > prevBest && g.score > 0) text("NEW BEST!", 0, 56, { size: 18, align: "center", color: pal.primary });
-      else text("BEST " + g.best, 0, 56, { size: 15, align: "center", color: "rgba(255,255,255,0.8)" });
-      if (stateT > 0.7) text("TAP TO RETRY", 0, 100, { size: 16, align: "center", color: pal.secondary });
-      ctx.restore();
-    }
-    function drawPaused() {
-      overlay(0.5);
-      text("PAUSED", view.W / 2, view.H * 0.45, { size: 36, align: "center" });
-      text("tap to resume", view.W / 2, view.H * 0.45 + 30, { size: 14, align: "center", weight: "600" });
     }
 
-    function render() {
-      const t = now() / 1000;
-      drawBackground(t);
-      applyView();
-      safe(hooks.drawBehind, "drawBehind", ctx, g);
-      ctx.save();
-      const sorted = entities.slice().sort((a, b) => a.z - b.z);
-      for (const e of sorted) drawEntity(e);
+    // ---------------------------------------------------------------- menus
+    function drawMenu() {
+      const W = view.W, H = view.H, t = ui.time, e = stateT;
+      const vg = ctx.createLinearGradient(0, 0, 0, H);
+      vg.addColorStop(0, "rgba(8,6,24,0.3)"); vg.addColorStop(0.55, "rgba(8,6,24,0.5)"); vg.addColorStop(1, "rgba(8,6,24,0.85)");
+      ctx.fillStyle = vg; ctx.fillRect(-10, -10, W + 20, H + 20);
+
+      const heroY = H * 0.47;
+      ctx.save(); ctx.translate(W / 2, heroY); ctx.rotate(t * 0.12);
+      ctx.fillStyle = alpha(pal.primary, 0.07);
+      for (let i = 0; i < 12; i += 1) {
+        const a = (i / 12) * Math.PI * 2;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, W, a, a + 0.2); ctx.closePath(); ctx.fill();
+      }
       ctx.restore();
+      const glowR = 110 + Math.sin(t * 2) * 6;
+      const rg = ctx.createRadialGradient(W / 2, heroY, 8, W / 2, heroY, glowR);
+      rg.addColorStop(0, alpha(pal.secondary, 0.5)); rg.addColorStop(1, alpha(pal.secondary, 0));
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(W / 2, heroY, glowR, 0, Math.PI * 2); ctx.fill();
+      const heroIn = EASE.back(clamp((e - 0.15) / 0.5, 0, 1));
+      if (heroIn > 0.01) {
+        ctx.save(); ctx.translate(W / 2, heroY + Math.sin(t * 2.4) * 6); ctx.scale(heroIn, heroIn);
+        drawHero(0, 0, 96);
+        ctx.restore();
+      }
+
+      const title = String(PKG.title || config.title || "Play").toUpperCase(); // the saved title wins (creators rename games)
+      const fit = fitTitle(title, W - 36, H * 0.24);
+      fit.lines.forEach((line, i) => {
+        const delay = i * 0.09;
+        const k = EASE.back(clamp((e - delay) / 0.5, 0, 1));
+        ctx.globalAlpha = clamp((e - delay) / 0.2, 0, 1);
+        const y = H * 0.1 + fit.size * 0.6 + i * fit.size * 1.04 + Math.sin(t * 1.6 + i) * 3 - (1 - k) * 50;
+        text(line, W / 2, y, { font: "display", size: fit.size, align: "center", baseline: "middle", gradient: ["#ffffff", pal.primary] });
+      });
+      ctx.globalAlpha = 1;
+      if (config.subtitle) {
+        const sy = H * 0.1 + fit.size * 0.6 + fit.lines.length * fit.size * 1.04 + 4;
+        text(config.subtitle, W / 2, sy, { size: 15, align: "center", baseline: "middle", color: pal.secondary });
+      }
+
+      const bk = EASE.back(clamp((e - 0.3) / 0.45, 0, 1));
+      button("play", W / 2, H * 0.69, 210, 66, { label: "PLAY", icon: "play", color: "accent", shimmer: true, size: 30, scale: bk * (1 + Math.sin(t * 4) * 0.03) });
+
+      const hint = config.hint || (PKG.gameplay && PKG.gameplay.controls) || "";
+      if (hint) {
+        const lines = wrapLines(hint, W - 108, 13, "ui");
+        const ch = 18 + lines.length * 17;
+        const cy = H * 0.79;
+        ctx.globalAlpha = clamp((e - 0.45) / 0.3, 0, 1);
+        glass(30, cy, W - 60, ch, 14);
+        icon("tap", 56, cy + ch / 2, 22, pal.secondary);
+        lines.forEach((l, i) => text(l, 76, cy + 9 + 13 + i * 17, { size: 13, stroke: false, shadow: false, color: "rgba(255,255,255,0.92)" }));
+        ctx.globalAlpha = 1;
+      }
+      if (g.best > 0) chip("BEST " + g.best, W / 2, H * 0.94, { icon: "trophy", size: 13, color: pal.primary });
+      button("mute", W - 30, 30, 40, 40, { variant: "glass", icon: audio.muted ? "muted" : "sound", radius: 12, states: ["menu"] });
+    }
+
+    function drawOver() {
+      const W = view.W, H = view.H, e = stateT;
+      overlay(0.62 * Math.min(1, e / 0.3));
+      const k = EASE.back(clamp(e / 0.45, 0, 1));
+      const cw = 296, chh = 290, cy = H * 0.42;
+      ctx.save(); ctx.translate(W / 2, cy); ctx.scale(k, k);
+      roundRect(-cw / 2, -chh / 2 + 8, cw, chh, 26); ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fill();
+      roundRect(-cw / 2, -chh / 2, cw, chh, 26);
+      const cg = ctx.createLinearGradient(0, -chh / 2, 0, chh / 2);
+      cg.addColorStop(0, shade(pal.bg2, -0.15)); cg.addColorStop(1, shade(pal.bg1, -0.4));
+      ctx.fillStyle = cg; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,0.16)"; ctx.stroke();
+
+      const rc = g.won ? pal.good : pal.danger;
+      ribbon(0, -chh / 2, 236, 52, rc);
+      const title = String(g.overTitle || (g.won ? "YOU WIN!" : "GAME OVER")).toUpperCase();
+      text(title, 0, -chh / 2 + 1, { font: "display", size: fitText(title, 206, 30, "display", 16), align: "center", baseline: "middle" });
+
+      text("SCORE", 0, -66, { size: 13, align: "center", baseline: "middle", color: "rgba(255,255,255,0.7)", stroke: false, shadow: false });
+      const shown = Math.round(g.score * EASE.out(clamp((e - 0.25) / 0.9, 0, 1)));
+      text(String(shown), 0, -24, { font: "display", size: fitText(String(g.score), 240, 64, "display", 28), align: "center", baseline: "middle", gradient: ["#ffffff", pal.primary] });
+
+      if (ui.newBest) {
+        const p = 1 + Math.sin(ui.time * 8) * 0.06;
+        ctx.save(); ctx.translate(0, 26); ctx.scale(p, p);
+        chip("NEW BEST!", 0, 0, { icon: "star", size: 15, color: pal.primary, fill: alpha(shade(pal.primary, -0.55), 0.9) });
+        ctx.restore();
+      }
+      const mins = Math.floor(g.time / 60), secs = Math.floor(g.time % 60);
+      const stats = [["trophy", "" + g.best], ["clock", mins + ":" + (secs < 10 ? "0" : "") + secs], ["star", "LV " + g.level]];
+      stats.forEach((s, i) => chip(s[1], (i - 1) * 92, 82, { icon: s[0], size: 12, width: 84 }));
+      ctx.restore();
+
+      if (e > 0.5) {
+        const bk = EASE.back(clamp((e - 0.55) / 0.4, 0, 1));
+        const by = cy + chh / 2 + 52;
+        button("retry", W / 2 + 28, by, 190, 60, { label: "PLAY AGAIN", icon: "restart", color: g.won ? "good" : "accent", shimmer: true, size: 21, scale: bk });
+        button("home", W / 2 - 104, by, 56, 56, { icon: "home", color: "secondary", radius: 18, scale: bk });
+      }
+    }
+
+    function drawPaused() {
+      const W = view.W, H = view.H, cy = H * 0.45;
+      overlay(0.62);
+      const k = EASE.back(clamp(stateT / 0.3, 0, 1));
+      ctx.save(); ctx.translate(W / 2, cy); ctx.scale(k, k);
+      glass(-130, -150, 260, 300, 26, { fill: "rgba(14,10,36,0.82)" });
+      text("PAUSED", 0, -110, { font: "display", size: fitText("PAUSED", 220, 34, "display", 16), align: "center", baseline: "middle", gradient: ["#ffffff", pal.secondary] });
+      ctx.restore();
+      if (k < 0.98) return;
+      button("resume", W / 2, cy - 38, 200, 58, { label: "RESUME", icon: "play", color: "good", size: 22, states: ["paused"] });
+      button("restart", W / 2, cy + 34, 200, 50, { label: "RESTART", icon: "restart", color: "secondary", size: 18, states: ["paused"] });
+      button("mute", W / 2, cy + 98, 200, 46, { variant: "glass", font: "ui", label: audio.muted ? "SOUND OFF" : "SOUND ON", icon: audio.muted ? "muted" : "sound", size: 15, radius: 23, states: ["paused"] });
+    }
+
+    function drawLevelBanner() {
+      if (!levelBanner) return;
+      const k = levelBanner.t / 1.6;
+      const s = k < 0.22 ? EASE.back(k / 0.22) : k > 0.82 ? Math.max(0, 1 - (k - 0.82) / 0.18) : 1;
+      if (s <= 0.01) return;
+      ctx.save(); ctx.translate(view.W / 2, view.H * 0.34); ctx.scale(s, s);
+      ribbon(0, 0, 230, 56, pal.accent);
+      text(levelBanner.text, 0, 1, { font: "display", size: 30, align: "center", baseline: "middle", gradient: ["#ffffff", pal.primary] });
+      ctx.restore();
+    }
+    function drawParticles() {
       for (const p of particles) {
         const k = 1 - p.t / p.life;
         ctx.globalAlpha = Math.max(0, k);
@@ -1006,29 +1335,74 @@
         else ctx.fillRect(px - s / 2, py - s / 2, s, s);
       }
       ctx.globalAlpha = 1;
+    }
+    function hitButton(p) {
+      for (let i = ui.hits.length - 1; i >= 0; i -= 1) {
+        const b = ui.hits[i];
+        if (b.states.includes(state) && p.x >= b.x - 6 && p.x <= b.x + b.w + 6 && p.y >= b.y - 6 && p.y <= b.y + b.h + 6) return b.id;
+      }
+      return null;
+    }
+    const UI_ACTIONS = {
+      pause: () => setState("paused"),
+      resume: () => setState("play"),
+      mute: () => audio.toggle(),
+      restart: () => startPlay(),
+      home: () => { newRun(); setState("menu"); }
+    };
+    function updateUi(dt) {
+      ui.time += dt;
+      for (const id of Object.keys(ui.pressFx)) { ui.pressFx[id] -= dt; if (ui.pressFx[id] <= 0) delete ui.pressFx[id]; }
+      for (const r of ui.ripples) r.t += dt;
+      ui.ripples = ui.ripples.filter((r) => r.t < 0.4);
+      if (g.score > ui.lastScore) ui.scoreBump = 1;
+      ui.lastScore = g.score;
+      ui.scoreBump = Math.max(0, ui.scoreBump - dt * 4);
+      if (ui.shownScore < g.score) ui.shownScore = Math.min(g.score, ui.shownScore + Math.max(1, Math.ceil((g.score - ui.shownScore) * dt * 12)));
+      else ui.shownScore = g.score;
+      ui.fade = Math.max(0, ui.fade - dt * 2.6);
+    }
+
+    function render() {
+      ui.hits = [];
+      drawBackground(ui.time);
+      applyView();
+      safe(hooks.drawBehind, "drawBehind", ctx, g);
+      ctx.save();
+      const sorted = entities.slice().sort((a, b) => a.z - b.z);
+      for (const e of sorted) drawEntity(e);
+      ctx.restore();
+      if (state !== "over") drawParticles();
       safe(hooks.draw, "draw", ctx, g);
       for (const f of floats) {
         const k = f.t / f.life;
         ctx.globalAlpha = 1 - k * k;
-        const s = f.size * (k < 0.15 ? 0.6 + (k / 0.15) * 0.5 : 1.1 - (k - 0.15) * 0.1);
-        text(f.text, f.x - cam.x, f.y - cam.y - k * 42, { size: s, align: "center" });
+        const s = f.size * (k < 0.15 ? 0.6 + (k / 0.15) * 0.55 : 1.15 - (k - 0.15) * 0.15);
+        text(f.text, f.x - cam.x, f.y - cam.y - k * 46, { font: "display", size: s, align: "center", baseline: "middle", color: f.color });
       }
       ctx.globalAlpha = 1;
-      if (levelBanner) {
-        const k = levelBanner.t / 1.4;
-        const x = view.W / 2 + (k < 0.2 ? (1 - k / 0.2) * view.W : k > 0.8 ? -((k - 0.8) / 0.2) * view.W : 0);
-        ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(-10, view.H * 0.4 - 34, view.W + 20, 56);
-        text(levelBanner.text, x, view.H * 0.4 + 6, { size: 30, align: "center", color: pal.primary });
+      for (const r of ui.ripples) {
+        const k = r.t / 0.4;
+        ctx.globalAlpha = (1 - k) * 0.5;
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1 + 3 * (1 - k);
+        ctx.beginPath(); ctx.arc(r.x, r.y, 8 + k * 34, 0, Math.PI * 2); ctx.stroke();
       }
+      ctx.globalAlpha = 1;
+      drawLevelBanner();
       if (state === "play" || state === "paused") drawHud();
       if (flashFx && flashFx.a > 0) { ctx.globalAlpha = flashFx.a; ctx.fillStyle = flashFx.color; ctx.fillRect(-10, -10, view.W + 20, view.H + 20); ctx.globalAlpha = 1; }
-      if (state === "menu") drawMenu(t);
-      else if (state === "over") drawOver();
+      if (state === "menu") drawMenu();
+      else if (state === "over") { drawOver(); drawParticles(); }
       else if (state === "paused") drawPaused();
+      if (ui.fade > 0) { ctx.fillStyle = alpha(shade(pal.bg1, -0.5), ui.fade); ctx.fillRect(-10, -10, view.W + 20, view.H + 20); }
     }
 
     // ----------------------------------------------------------------- step
-    function setState(s) { state = s; stateT = 0; g.state = s; }
+    function setState(s) {
+      const prev = state;
+      state = s; stateT = 0; g.state = s;
+      if (s === "play" && (prev === "menu" || prev === "over")) ui.fade = 0.85;
+    }
     function newRun() {
       entities = []; particles = []; floats = []; tweens = [];
       timers = timers.filter((tm) => tm.permanent);
@@ -1040,6 +1414,7 @@
       cam.x = 0; cam.y = 0; cam.target = null; cam.shakeT = 0; flashFx = null; levelBanner = null;
       bg.speedX = bg.baseSpeedX || 0; bg.speedY = bg.baseSpeedY || 0; bg.offX = 0; bg.offY = 0;
       comboState.n = 0; comboState.t = 0;
+      ui.shownScore = 0; ui.lastScore = 0; ui.scoreBump = 0; ui.newBest = false; ui.ripples = [];
       inSetup = true;
       safe(hooks.setup, "setup", g);
       inSetup = false;
@@ -1053,6 +1428,7 @@
     function step(dt) {
       g.dt = dt;
       stateT += dt;
+      updateUi(dt);
       applyInjected();
       if (state === "menu") {
         if (input.pressed || input.action) startPlay();
@@ -1094,7 +1470,7 @@
       floats = floats.filter((f) => f.t < f.life);
       if (cam.shakeT > 0) { cam.shakeT -= dt; if (cam.shakeT <= 0) cam.shakeAmp = 0; }
       if (flashFx) { flashFx.a -= dt * 1.6; if (flashFx.a <= 0) flashFx = null; }
-      if (levelBanner) { levelBanner.t += dt; if (levelBanner.t > 1.4) levelBanner = null; }
+      if (levelBanner) { levelBanner.t += dt; if (levelBanner.t > 1.6) levelBanner = null; }
       endFrameInput();
     }
     function updateEntities(dt) {
@@ -1221,7 +1597,7 @@
       loseLife(opts) {
         if (state !== "play") return g.lives;
         g.lives -= 1;
-        shake(8, 0.3); flash("danger", 0.3); audio.play("hit");
+        shake(8, 0.3); flash("danger", 0.3); audio.play("hit"); buzz(40);
         if (g.lives <= 0) g.over(opts);
         return g.lives;
       },
@@ -1232,9 +1608,13 @@
         g.won = Boolean(opts.win);
         g.overTitle = opts.title || null;
         prevBest = g.best;
+        ui.newBest = g.score > prevBest && g.score > 0;
         if (g.score > g.best) { g.best = g.score; store.set(bestKey, g.best); }
         audio.play(g.won ? "win" : "lose");
-        if (!g.won) shake(10, 0.35);
+        if (!g.won) { shake(10, 0.35); buzz([60, 40, 60]); }
+        if (ui.newBest || g.won) {
+          burst(cam.x + view.W / 2, cam.y + view.H * 0.2, { color: [pal.primary, pal.secondary, pal.accent, pal.good], count: 60, speed: 340, gravity: 420, life: 1.8, size: 7 });
+        }
         setState("over");
         safe(hooks.onOver, "onOver", g);
         try { if (typeof root.reportScore === "function") root.reportScore(g.score); } catch (e) { /* platform hook */ }
@@ -1243,7 +1623,8 @@
       nextLevel() {
         g.level += 1;
         levelBanner = { text: "LEVEL " + g.level, t: 0 };
-        audio.play("level"); flash("primary", 0.2);
+        audio.play("level"); flash("primary", 0.2); buzz(20);
+        burst(cam.x + view.W / 2, cam.y + view.H * 0.34, { color: [pal.primary, pal.accent], count: 26, speed: 260, gravity: 200, life: 0.9 });
         safe(hooks.onLevel, "onLevel", g, g.level);
         return g.level;
       },
@@ -1282,6 +1663,7 @@
       if (started) return;
       started = true;
       resize();
+      loadFonts();
       setupBackground(config.background || {});
       bg.baseSpeedX = bg.speedX || 0; bg.baseSpeedY = bg.speedY || 0;
       bindInput();
@@ -1306,6 +1688,8 @@
       types() { const out = {}; for (const e of entities) out[e.type] = (out[e.type] || 0) + 1; return out; },
       boot,
       start() { if (state !== "play") startPlay(); },
+      pause() { if (state === "play") setState("paused"); },
+      end(opts) { g.over(opts); },
       tap(x, y) { injected.push({ type: "down", x: x != null ? x : view.W / 2, y: y != null ? y : view.H * 0.6 }); injected.push({ type: "up", x: x != null ? x : view.W / 2, y: y != null ? y : view.H * 0.6, delay: true }); },
       down(x, y) { injected.push({ type: "down", x, y }); },
       up(x, y) { injected.push({ type: "up", x, y }); },

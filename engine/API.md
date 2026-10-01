@@ -118,8 +118,16 @@ Enemies can shoot too: `enemy.shoots({ every: 1.5, dir: player, type: "enemy_bul
 - `g.hud.set("Ammo", 5)` — extra HUD line. Score, best, lives, pause and mute are automatic.
 - `g.draw((ctx, g) => {})` — extra drawing above entities; `g.drawBehind((ctx, g) => {})` — below them.
   Both run in logical coordinates. Subtract `g.camera.x/y` for world positions.
-  `g.text(str, x, y, { size, color, align })` draws outlined text.
+  `g.text(str, x, y, { size, color, align, baseline, font: "display" | "ui", gradient: [top, bottom] })` draws outlined
+  text in the style's web fonts (`display` for titles and numbers, `ui` for labels).
 - Colors: `g.pal.primary` etc. or `g.color("accent")`. Never hardcode a palette; use palette keys.
+
+## Built-in UI (do not rebuild it)
+The engine draws a styled start menu (title, hero, PLAY button, controls hint, best score), the HUD
+(score, best, lives, level, combo meter, pause and sound buttons), a pause panel (resume / restart / sound),
+the game-over card (score, new-best confetti, time, level, PLAY AGAIN / home), level banners, fade transitions,
+touch ripples and phone vibration. KULT.game options: `title`, `subtitle`, `hint`, `lives`, `hud: { level: true }`,
+`haptics: false`, `touchRipples: false`.
 
 ## Input (only when a movement verb does not fit)
 `g.input.pressed` (pressed this frame), `g.input.down`, `g.input.held`, `g.input.x/y` (logical),
