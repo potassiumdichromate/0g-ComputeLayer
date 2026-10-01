@@ -1,0 +1,23 @@
+{
+  "name": "@kult/compute-layer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KULT compute layer: multi-agent DAG that turns one prompt into a polished game on the AI-first KULT Engine, running on 0G Compute.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/*.test.js",
+    "test:recipes": "node scripts/test-recipes.mjs",
+    "eval": "node scripts/eval.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "nanoid": "^5.0.9",
+    "puppeteer-core": "^24.1.0",
+    "sharp": "^0.34.5",
+    "zod": "^3.24.1"
+  }
+}
