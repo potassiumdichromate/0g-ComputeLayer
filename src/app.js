@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { join, normalize } from "node:path";
 import { existsSync } from "node:fs";
-import { DATA_DIR } from "./config/env.js";
+import { DATA_DIR, DATA_DIR_PROBLEM } from "./config/env.js";
 import { isMockMode, llmConfigError } from "./llm/client.js";
 import { listStyles } from "../styles/presets.js";
 import { listRecipes } from "../recipes/index.js";
@@ -48,7 +48,7 @@ export function createApp(service) {
     ok: !llmConfigError() && !publicUrlProblem(), service: "kult-compute-layer",
     // Render sets RENDER_GIT_COMMIT: shows which commit is actually deployed.
     version: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "dev").slice(0, 7),
-    mock: isMockMode(), problem: llmConfigError() || publicUrlProblem(), publicBaseUrl: publicBaseUrl(), browser: Boolean(findBrowser()),
+    mock: isMockMode(), problem: llmConfigError() || publicUrlProblem(), storage: { dataDir: DATA_DIR, warning: DATA_DIR_PROBLEM }, publicBaseUrl: publicBaseUrl(), browser: Boolean(findBrowser()),
     tiers: [1, 2, 3].map((t) => tierConfig(t))
   }));
 
