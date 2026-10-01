@@ -28,7 +28,9 @@ export async function askJson({ llm, schema, messages, attempts = 2, ...options 
   const convo = [...messages];
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const reply = await llm.chat({ ...options, messages: convo });
+    // Structured replies are short; Claude models would otherwise spend the
+    // max_tokens budget on hidden thinking and cut the JSON off.
+    const reply = await llm.chat({ thinking: { type: "disabled" }, ...options, messages: convo });
     try {
       if (reply.finishReason === "length") throw new Error("the reply was cut off before the JSON finished — be more concise");
       const parsed = schema.safeParse(extractJson(reply.content));

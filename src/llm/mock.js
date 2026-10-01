@@ -89,6 +89,14 @@ export async function mockChat({ purpose, messages }) {
 export async function mockImage({ prompt, size }) {
   const [w, h] = String(size || "1024x1024").split("x").map(Number);
   const hh = hue(prompt);
+  // Sprite requests ask for a chroma-key background: draw a character on it so
+  // the real cut-out path runs offline.
+  const key = /pure (magenta|green)/.exec(prompt)?.[1];
+  if (key) {
+    const bg = key === "green" ? "#00ff00" : "#ff00ff";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/><ellipse cx="${w / 2}" cy="${h * 0.86}" rx="${w * 0.25}" ry="${h * 0.04}" fill="${key === "green" ? "#00aa00" : "#aa00aa"}"/><circle cx="${w / 2}" cy="${h / 2}" r="${w * 0.3}" fill="hsl(${hh},75%,58%)" stroke="#1b1733" stroke-width="${w * 0.025}"/><circle cx="${w * 0.42}" cy="${h * 0.45}" r="${w * 0.05}" fill="#fff"/><circle cx="${w * 0.58}" cy="${h * 0.45}" r="${w * 0.05}" fill="#fff"/><circle cx="${w * 0.43}" cy="${h * 0.46}" r="${w * 0.022}" fill="#1b1733"/><circle cx="${w * 0.59}" cy="${h * 0.46}" r="${w * 0.022}" fill="#1b1733"/></svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hh},60%,35%)"/><stop offset="1" stop-color="hsl(${(hh + 60) % 360},60%,20%)"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="${w / 2}" cy="${h * 0.6}" r="${w * 0.22}" fill="hsl(${(hh + 180) % 360},70%,60%)" opacity="0.5"/></svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }

@@ -57,7 +57,7 @@ export const brief = {
             ...listRecipes().map((r) => `- ${r.id}: ${r.name} — ${r.summary}`),
             "Styles:",
             ...listStyles().map((s) => `- ${s.id}: ${s.description}`),
-            "Use portrait unless the idea clearly needs a wide screen."
+            "orientation is always \"portrait\" (games run full screen on phones)."
           ].join("\n")
         },
         { role: "user", content: `PROMPT:\n${prompt}\n\n` }
@@ -125,7 +125,8 @@ export const designer = {
         }
       ]
     });
-    return { ...value, recipe: recipe.id };
+    // Every game ships portrait (the player frame is a tall phone screen).
+    return { ...value, recipe: recipe.id, orientation: "portrait" };
   },
   async fallback(ctx) {
     const b = ctx.out("brief");

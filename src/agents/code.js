@@ -19,6 +19,8 @@ const HARD_RULES = [
   "- Spawn entities using the design's entity names as the type (g.spawn(\"player\", ...)), so their sprites appear automatically. For sprite entities give only `h` so the width follows the art. ALSO give each a fitting `shape` and palette `color` (and `face: true` for creatures) so it still looks good as a shape.",
   "- Use palette keys (primary, secondary, accent, danger, good, text, bg1, bg2) for every color. Do not pass palette, style or font to KULT.game. Only pass background.deco if the design's background calls for one.",
   "- Fully playable by touch alone. The `hint` explains the controls in one short sentence.",
+  "- Size for a phone: the player sprite is 64–96 px tall, enemies/hazards/collectibles 40–72 px, so the art reads clearly. Never draw sprites under 32 px.",
+  "- Games are portrait and fill a phone screen: do NOT pass `orientation` to KULT.game. Lay everything out relative to g.W (360) and g.H.",
   "- Difficulty must escalate over time (g.ramp, g.every with a function, g.nextLevel()).",
   "- Juice every key moment: burst particles on collect/destroy, shake on damage, g.addScore with coordinates for floating text, a g.sfx for every event.",
   "- Nothing may pile up forever: give spawned objects a ttl, bounds \"kill\", or kill them.",
@@ -35,7 +37,8 @@ function stripFence(text) {
     .trim();
 }
 
-async function writeCode(ctx, { role, purpose, system, user, maxTokens = 16000 }) {
+// 24K leaves room for the model's hidden thinking plus a full game.
+async function writeCode(ctx, { role, purpose, system, user, maxTokens = 24000 }) {
   const messages = [{ role: "system", content: system }, { role: "user", content: user }];
   const first = await ctx.llm.chat({ role, purpose, messages, maxTokens, temperature: 0.4, timeoutMs: 12 * 60_000, retries: 1 });
   if (first.finishReason !== "length") return { code: stripFence(first.content), model: first.model };

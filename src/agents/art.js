@@ -1,5 +1,5 @@
 import { sanitizeSvg, rasterizeSvg, inspectSprite } from "../media/svg.js";
-import { cutOutSprite, normalizeBackground, normalizeCover, fallbackCover } from "../media/image.js";
+import { cutOutSprite, chooseKey, normalizeBackground, normalizeCover, fallbackCover } from "../media/image.js";
 import { readArtifact, readFileRef } from "../media/storage.js";
 import { getStyle } from "../../styles/presets.js";
 import { mergeStyle } from "./planning.js";
@@ -58,7 +58,15 @@ async function drawSvgSprite(ctx, { entry, style, design, feedback, previousSvg 
   ];
   let last = null;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const reply = await ctx.llm.chat({ role: "illustrator", purpose: "illustrator", messages, maxTokens: 8000, temperature: 0.6, timeoutMs: 240_000 });
+    // Claude models on the router "think" by default and that thinking spends
+    // the same max_tokens budget — an 8K budget was cut off mid-SVG. Disable it
+    // and, if the reply is still cut off, ask for the rest.
+    const opts = { role: "illustrator", purpose: "illustrator", maxTokens: 12000, temperature: 0.6, timeoutMs: 240_000, thinking: { type: "disabled" } };
+    let reply = await ctx.llm.chat({ ...opts, messages });
+    if (reply.finishReason === "length" && !/<\/svg>/i.test(reply.content)) {
+      const rest = await ctx.llm.chat({ ...opts, messages: [...messages, { role: "assistant", content: reply.content }, { role: "user", content: "You were cut off. Continue the SVG exactly where you stopped, no repetition, and finish with </svg>." }] });
+      reply = { ...reply, content: reply.content + rest.content };
+    }
     const clean = sanitizeSvg(reply.content, { width: entry.width, height: entry.height });
     const raster = await rasterizeSvg(clean, 256);
     const check = await inspectSprite(raster.png);
@@ -70,21 +78,42 @@ async function drawSvgSprite(ctx, { entry, style, design, feedback, previousSvg 
   return { png: last.raster.png, width: last.raster.width, height: last.raster.height, svg: last.clean.svg, warnings: last.issues };
 }
 
+const VIEW_HINTS = {
+  right: "side view, facing right",
+  left: "side view, facing left",
+  up: "top-down view from directly above, front pointing up",
+  down: "top-down view from directly above, front pointing down",
+  none: "front view, symmetric"
+};
+
+// Image-model sprite: one illustration on a flat chroma-key background, then a
+// hue-based cut-out (media/image.js). The palette and style line are shared by
+// every sprite in the game so the set looks like one artist drew it.
 async function drawImageSprite(ctx, { entry, style, design, feedback }) {
-  const prompt = [
-    style.imagePrompt,
+  const key = chooseKey(`${entry.description} ${feedback ?? ""}`);
+  const palette = [style.palette.primary, style.palette.secondary, style.palette.accent, style.palette.good].join(", ");
+  const base = [
+    `${style.imagePrompt}, cohesive with the other art of the mobile game "${design?.title ?? ""}"`,
     `${entry.description}`,
-    `single ${entry.role ?? "game"} sprite for the mobile game "${design?.title ?? ""}", ${facingRule(entry.facing)}`,
-    feedback ? `Changes: ${feedback}` : null,
-    "centered, whole object visible, isolated on a perfectly flat solid magenta (#ff00ff) background, no shadow, no text, no border"
+    feedback ? `Changes requested: ${feedback}` : null,
+    `single ${entry.role ?? "game"} sprite, ${VIEW_HINTS[entry.facing] ?? VIEW_HINTS.none}, whole object fully visible and centered with empty margin around it`,
+    `color accents from this palette: ${palette}`,
+    "bold clean dark outline, crisp readable silhouette at small size, game-ready asset",
+    `isolated on a perfectly flat, uniform, solid pure ${key.name} (${key.hex}) background, no ground, no floor, no cast shadow, no drop shadow, no scenery, no text, no border, no frame`
   ].filter(Boolean).join(". ");
-  const raw = await ctx.image({ prompt, size: "1024x1024" });
-  const png = await cutOutSprite(raw, { size: 256 });
-  const check = await inspectSprite(png);
-  if (check.issues.some((i) => i.includes("empty"))) throw new Error("Sprite cut-out left nothing");
+  let last = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const prompt = attempt === 1 ? base : `${base}. IMPORTANT: the background must be one flat ${key.name} color only, with nothing else in the picture`;
+    const raw = await ctx.image({ prompt, size: "1024x1024" });
+    const png = await cutOutSprite(raw, { size: 320, key });
+    const check = await inspectSprite(png);
+    last = { png, issues: check.issues };
+    if (!check.issues.length) break;
+  }
+  if (last.issues.length) throw new Error(`Sprite cut-out unusable: ${last.issues.join(" ")}`);
   const { default: sharp } = await import("sharp");
-  const meta = await sharp(png).metadata();
-  return { png, width: meta.width, height: meta.height, svg: null, warnings: check.issues };
+  const meta = await sharp(last.png).metadata();
+  return { png: last.png, width: meta.width, height: meta.height, svg: null, warnings: [] };
 }
 
 // --------------------------------------------------------------- illustrator

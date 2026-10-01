@@ -12,18 +12,18 @@ const DEFAULTS = {
       illustrator: "glm-5",
       engineer: "gpt-5.6-terra",
       repair: "gpt-5.6-sol",
-      judge: "qwen/qwen3-vl-30b-a3b-instruct",
+      judge: "qwen3-vl-30b",
       copywriter: "deepseek-v4-flash",
       editRouter: "deepseek-v4-flash",
       image: "z-image-turbo"
     },
     features: {
-      sprites: "none",        // none | svg | image
-      environment: "none",    // none | image
+      sprites: "image",       // image (0G image model + cut-out) | svg (LLM-drawn) | none (shapes)
+      environment: "image",   // none | image
       cover: "image",         // none | image
       playtest: false,        // headless browser screenshots + vision judge
       repairAttempts: 1,
-      maxSprites: 0,
+      maxSprites: 3,
       approval: false         // pause for style approval
     }
   },
@@ -40,11 +40,11 @@ const DEFAULTS = {
       editRouter: "deepseek-v4-flash",
       image: "z-image-turbo"
     },
-    features: { sprites: "svg", environment: "image", cover: "image", playtest: true, repairAttempts: 2, maxSprites: 5, approval: false }
+    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 2, maxSprites: 5, approval: false }
   },
   3: {
     models: {
-      brief: "MiniMax-M3",
+      brief: "minimax-m3",
       designer: "claude-opus-4-8",
       artDirector: "claude-opus-5",
       illustrator: "claude-opus-5",
@@ -55,7 +55,7 @@ const DEFAULTS = {
       editRouter: "deepseek-v4-flash",
       image: "z-image-turbo"
     },
-    features: { sprites: "svg", environment: "image", cover: "image", playtest: true, repairAttempts: 3, maxSprites: 7, approval: false }
+    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 3, maxSprites: 7, approval: false }
   }
 };
 

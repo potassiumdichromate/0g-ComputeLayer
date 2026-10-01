@@ -262,7 +262,9 @@
       canvas.height = Math.round(ch * dpr);
       if (canvas.style) { canvas.style.width = cw + "px"; canvas.style.height = ch + "px"; canvas.style.touchAction = "none"; }
       const orientation = config.orientation || "portrait";
-      const portrait = orientation === "portrait" || (orientation === "any" && ch >= cw);
+      // "landscape" means "wide when the screen is wide": on a phone held
+      // upright it still fills the screen instead of becoming a thin strip.
+      const portrait = orientation === "portrait" || ch >= cw;
       if (portrait) { view.W = 360; view.H = Math.round(clamp((360 * ch) / cw, 560, 780)); }
       else { view.H = 360; view.W = Math.round(clamp((360 * cw) / ch, 560, 780)); }
       view.scale = Math.min(canvas.width / view.W, canvas.height / view.H);
@@ -733,10 +735,24 @@
         const img = assets.get(bg.sprite);
         const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
         const w = img.naturalWidth * s, h = img.naturalHeight * s;
+        // Tiles alternate mirrored so every seam joins matching pixels — AI
+        // backgrounds are not seamless, a plain repeat shows a hard edge.
         const scrollX = bg.offX + cam.x * 0.3, scrollY = bg.offY + cam.y * 0.3;
-        const xs = scrollX ? [0, 1].map((k) => ((((-scrollX) % w) + w) % w) - w + k * w) : [(W - w) / 2];
-        const ys = scrollY ? [0, 1].map((k) => ((((-scrollY) % h) + h) % h) - h + k * h) : [(H - h) / 2];
-        for (const x of xs) for (const y of ys) ctx.drawImage(img, x, y, w + 0.5, h + 0.5);
+        const tiles = (scroll, size, view) => {
+          if (!scroll) return [{ pos: (view - size) / 2, flip: false }];
+          const base = Math.floor(scroll / size);
+          const off = scroll - base * size;
+          return [0, 1].map((j) => ({ pos: -off + j * size, flip: Math.abs(base + j) % 2 === 1 }));
+        };
+        for (const tx of tiles(scrollX, w, W)) {
+          for (const ty of tiles(scrollY, h, H)) {
+            ctx.save();
+            ctx.translate(tx.pos + (tx.flip ? w : 0), ty.pos + (ty.flip ? h : 0));
+            ctx.scale(tx.flip ? -1 : 1, ty.flip ? -1 : 1);
+            ctx.drawImage(img, 0, 0, w + 0.5, h + 0.5);
+            ctx.restore();
+          }
+        }
         return;
       }
       const deco = bg.deco;

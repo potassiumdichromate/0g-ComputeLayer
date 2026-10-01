@@ -1,36 +1,117 @@
 import sharp from "sharp";
 
-// Image-model sprites come on a flat background. Key out the color found on the
-// border (flood from the edges so interior pixels of the same color survive),
-// then trim and fit into a square transparent canvas.
-export async function cutOutSprite(buffer, { size = 256, tolerance = 60 } = {}) {
-  const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const { width: w, height: h, channels: c } = info;
-  const at = (x, y) => (y * w + x) * c;
-  const samples = [];
-  for (let x = 0; x < w; x += Math.max(1, Math.floor(w / 32))) samples.push(at(x, 0), at(x, h - 1));
-  for (let y = 0; y < h; y += Math.max(1, Math.floor(h / 32))) samples.push(at(0, y), at(w - 1, y));
-  const avg = [0, 1, 2].map((k) => samples.reduce((s, i) => s + data[i + k], 0) / samples.length);
-  const close = (i) => Math.abs(data[i] - avg[0]) + Math.abs(data[i + 1] - avg[1]) + Math.abs(data[i + 2] - avg[2]) < tolerance;
+// ------------------------------------------------------------------ sprites
+// Image-model sprites are generated on a flat chroma-key background (magenta,
+// or green when the sprite itself is pink/purple). Keying works on HUE, not
+// exact color, so the model's darker same-hue ground shadow goes too. Only
+// key-hued regions connected to the image border are removed, so the
+// character's outline protects its interior. Edges get a soft matte and the
+// key color is un-mixed from them (no magenta fringe); stray specks are dropped.
 
-  const seen = new Uint8Array(w * h);
-  const stack = [];
-  for (let x = 0; x < w; x += 1) stack.push(x, 0, x, h - 1);
-  for (let y = 0; y < h; y += 1) stack.push(0, y, w - 1, y);
-  while (stack.length) {
-    const y = stack.pop(), x = stack.pop();
-    if (x < 0 || y < 0 || x >= w || y >= h) continue;
-    const p = y * w + x;
-    if (seen[p]) continue;
-    seen[p] = 1;
-    const i = p * c;
-    if (!close(i)) continue;
-    data[i + 3] = 0;
-    stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
+export const KEY_COLORS = {
+  magenta: { name: "magenta", hex: "#ff00ff", rgb: [255, 0, 255] },
+  green: { name: "green", hex: "#00ff00", rgb: [0, 255, 0] }
+};
+
+// Magenta unless the sprite is likely to contain pink/purple/magenta itself.
+export function chooseKey(description = "") {
+  return /\b(pink|magenta|purple|violet|fuchsia|lilac|lavender|rose|orchid)\b/i.test(String(description)) ? KEY_COLORS.green : KEY_COLORS.magenta;
+}
+
+const chroma = (r, g, b) => [-0.169 * r - 0.331 * g + 0.5 * b, 0.5 * r - 0.419 * g - 0.081 * b];
+
+export async function cutOutSprite(buffer, { size = 320, key = null } = {}) {
+  const { data, info } = await sharp(buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: w, height: h } = info;
+  const n = w * h;
+
+  // Key color: the median of the border, so a stray object at the edge can't skew it.
+  const border = [];
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 64));
+  for (let x = 0; x < w; x += step) border.push((x) * 4, ((h - 1) * w + x) * 4);
+  for (let y = 0; y < h; y += step) border.push((y * w) * 4, (y * w + w - 1) * 4);
+  const median = (k) => border.map((i) => data[i + k]).sort((a, b) => a - b)[border.length >> 1];
+  const keyRgb = key ? key.rgb : [median(0), median(1), median(2)];
+  const [kcb, kcr] = chroma(...keyRgb);
+  const kAng = Math.atan2(kcr, kcb);
+  const kSat = Math.hypot(kcb, kcr);
+
+  // Keyness 0..1 per pixel: hue close to the key's hue and reasonably saturated.
+  const keyness = new Float32Array(n);
+  for (let p = 0; p < n; p += 1) {
+    const i = p * 4;
+    const [cb, cr] = chroma(data[i], data[i + 1], data[i + 2]);
+    const sat = Math.hypot(cb, cr);
+    if (sat < kSat * 0.12) continue;
+    let d = Math.abs(Math.atan2(cr, cb) - kAng);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    const hue = d < 0.35 ? 1 : d < 0.6 ? 1 - (d - 0.35) / 0.25 : 0;
+    const satW = sat >= kSat * 0.3 ? 1 : (sat - kSat * 0.12) / (kSat * 0.18);
+    keyness[p] = hue * satW;
   }
-  const keyed = await sharp(data, { raw: { width: w, height: h, channels: c } }).png().toBuffer();
-  const trimmed = await sharp(keyed).trim({ threshold: 10 }).png().toBuffer().catch(() => keyed);
-  return sharp(trimmed).resize(size, size, { fit: "inside", background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+
+  // Background = key-like pixels connected to the border.
+  const bg = new Uint8Array(n);
+  const stack = [];
+  const seed = (p) => { if (!bg[p] && keyness[p] > 0.5) { bg[p] = 1; stack.push(p); } };
+  for (let x = 0; x < w; x += 1) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y += 1) { seed(y * w); seed(y * w + w - 1); }
+  while (stack.length) {
+    const p = stack.pop();
+    const x = p % w, y = (p / w) | 0;
+    if (x > 0) seed(p - 1);
+    if (x < w - 1) seed(p + 1);
+    if (y > 0) seed(p - w);
+    if (y < h - 1) seed(p + w);
+  }
+
+  // Alpha: background → 0; pixels touching the background get a soft matte with
+  // the key color un-mixed out of them.
+  for (let p = 0; p < n; p += 1) {
+    const i = p * 4;
+    if (bg[p]) { data[i + 3] = 0; continue; }
+    const x = p % w, y = (p / w) | 0;
+    let edge = false;
+    for (let dy = -2; dy <= 2 && !edge; dy += 1) {
+      for (let dx = -2; dx <= 2; dx += 1) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < w && yy < h && bg[yy * w + xx]) { edge = true; break; }
+      }
+    }
+    if (!edge || keyness[p] <= 0.05) continue;
+    const a = Math.max(0.05, 1 - keyness[p]);
+    for (let k = 0; k < 3; k += 1) data[i + k] = Math.max(0, Math.min(255, Math.round((data[i + k] - (1 - a) * keyRgb[k]) / a)));
+    data[i + 3] = Math.round(255 * a);
+  }
+
+  // Drop specks: keep opaque components at least 1.5% the size of the largest.
+  const label = new Int32Array(n).fill(-1);
+  const sizes = [];
+  for (let p = 0; p < n; p += 1) {
+    if (label[p] !== -1 || data[p * 4 + 3] < 32) continue;
+    const id = sizes.length;
+    let count = 0;
+    label[p] = id;
+    stack.push(p);
+    while (stack.length) {
+      const q = stack.pop();
+      count += 1;
+      const x = q % w, y = (q / w) | 0;
+      const nb = [x > 0 ? q - 1 : -1, x < w - 1 ? q + 1 : -1, y > 0 ? q - w : -1, y < h - 1 ? q + w : -1];
+      for (const r of nb) if (r >= 0 && label[r] === -1 && data[r * 4 + 3] >= 32) { label[r] = id; stack.push(r); }
+    }
+    sizes.push(count);
+  }
+  const largest = Math.max(0, ...sizes);
+  for (let p = 0; p < n; p += 1) {
+    const id = label[p];
+    if (id >= 0 && sizes[id] < largest * 0.015) data[p * 4 + 3] = 0;
+    else if (id === -1 && data[p * 4 + 3] < 32) data[p * 4 + 3] = 0;
+  }
+
+  const keyed = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+  const trimmed = await sharp(keyed).trim({ threshold: 1 }).png().toBuffer().catch(() => keyed);
+  return sharp(trimmed).resize(size, size, { fit: "inside", withoutEnlargement: false, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
 }
 
 export async function normalizeBackground(buffer, { width = 720, height = 1280 } = {}) {

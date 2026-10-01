@@ -9,7 +9,7 @@ canvas lookup, or event listeners.
 
 ## Coordinates
 - Portrait (default): width `g.W` = 360, height `g.H` = 560–780 (read `g.H`, never assume).
-- Landscape (`orientation: "landscape"`): height `g.H` = 360, width `g.W` = 560–780.
+- Games are portrait; do not set `orientation`.
 - Entity `x, y` are the CENTER. `w, h` are the size. `e.left/right/top/bottom` exist.
 - Velocities are pixels per second. Gravity is pixels per second².
 
@@ -19,7 +19,6 @@ const g = KULT.game({
   title: "Game Title",
   hint: "Tap to jump. Avoid the spikes.",     // shown on the start menu
   lives: 3,                                    // 0 = no lives HUD
-  orientation: "portrait",
   world: { floor: (g) => g.H - 120 },          // ground y for body entities (number or function), or omit
   background: { deco: "stars", speedX: 0, speedY: 0 },  // deco: stars|clouds|bubbles|dots|grid|hills|none
   hud: { level: true }
