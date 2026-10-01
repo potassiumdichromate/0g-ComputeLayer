@@ -3,7 +3,7 @@ import { z } from "zod";
 import { join, normalize } from "node:path";
 import { existsSync } from "node:fs";
 import { DATA_DIR } from "./config/env.js";
-import { isMockMode } from "./llm/client.js";
+import { isMockMode, llmConfigError } from "./llm/client.js";
 import { listStyles } from "../styles/presets.js";
 import { listRecipes } from "../recipes/index.js";
 import { harvest, listLibrary } from "./library/library.js";
@@ -25,6 +25,15 @@ const harvestSchema = z.object({ rating: z.number().min(1).max(5), notes: z.stri
 export function createApp(service) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
+  app.use((req, res, next) => {
+    // Skip the high-volume polling and file routes; log everything else.
+    const started = Date.now();
+    res.on("finish", () => {
+      if (req.method === "GET" && (/^\/v1\/runs\/[^/]+$/.test(req.path) || req.path.startsWith("/files/"))) return;
+      console.info(`[http] ${req.method} ${req.path} ${res.statusCode} ${Date.now() - started}ms`);
+    });
+    next();
+  });
 
   // Service-to-service auth: creator-studio's backend calls this layer with a
   // shared key. Open when COMPUTE_API_KEY is unset (local development).
@@ -35,7 +44,10 @@ export function createApp(service) {
   };
 
   app.get("/health", (_req, res) => res.json({
-    ok: true, service: "kult-compute-layer", mock: isMockMode(), browser: Boolean(findBrowser()),
+    ok: !llmConfigError(), service: "kult-compute-layer",
+    // Render sets RENDER_GIT_COMMIT: shows which commit is actually deployed.
+    version: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "dev").slice(0, 7),
+    mock: isMockMode(), problem: llmConfigError(), browser: Boolean(findBrowser()),
     tiers: [1, 2, 3].map((t) => tierConfig(t))
   }));
 

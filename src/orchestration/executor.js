@@ -52,7 +52,15 @@ export class Executor {
     if (!this.emitters.has(runId)) { const e = new EventEmitter(); e.setMaxListeners(50); this.emitters.set(runId, e); }
     return this.emitters.get(runId);
   }
-  emit(run, type, data = {}) { this.emitter(run.id).emit("event", { type, runId: run.id, at: Date.now(), ...data }); }
+  emit(run, type, data = {}) {
+    this.emitter(run.id).emit("event", { type, runId: run.id, at: Date.now(), ...data });
+    // Server log: one line per run status change and per finished/failed node.
+    if (type === "run") console.info(`[run ${run.id}] ${data.status}${data.error ? " — " + data.error : ""}${run.kind ? " (" + run.kind + ", tier " + run.input?.tier + ")" : ""}`);
+    if (type === "node" && data.node && ["done", "degraded", "failed", "skipped", "blocked"].includes(data.node.status)) {
+      const n = data.node;
+      console.info(`[run ${run.id}] ${n.id} ${n.status} ${Math.round((n.ms ?? 0) / 1000)}s ${(n.models ?? []).join(",")}${n.error ? " — " + String(n.error).slice(0, 200) : ""}`);
+    }
+  }
   subscribe(runId, fn) { const e = this.emitter(runId); e.on("event", fn); return () => e.off("event", fn); }
 
   // --------------------------------------------------------------- graph

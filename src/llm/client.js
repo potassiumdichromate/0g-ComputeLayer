@@ -6,8 +6,16 @@ import { mockChat, mockImage } from "./mock.js";
 
 const DEFAULT_BASE_URL = "https://router-api.0g.ai/v1";
 
+// Mock replies are for local development. In production (NODE_ENV=production,
+// set by the Dockerfile) a missing key is an error, never a silent mock game.
 export function isMockMode() {
-  return /^(1|true|yes|on)$/i.test(String(process.env.LLM_MOCK ?? "")) || !process.env.ZERO_G_API_KEY;
+  if (/^(1|true|yes|on)$/i.test(String(process.env.LLM_MOCK ?? ""))) return true;
+  return !process.env.ZERO_G_API_KEY && process.env.NODE_ENV !== "production";
+}
+
+export function llmConfigError() {
+  if (isMockMode() || process.env.ZERO_G_API_KEY) return null;
+  return "ZERO_G_API_KEY is not set on the compute layer (set it in the service environment, or LLM_MOCK=1 to test offline)";
 }
 
 function clientConfig() {

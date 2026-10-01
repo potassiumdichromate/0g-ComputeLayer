@@ -6,6 +6,7 @@ import { buildGraph, editGraph } from "./graphs.js";
 import { AGENTS } from "../agents/index.js";
 import { normalizeTier } from "../config/tiers.js";
 import { getStyle } from "../../styles/presets.js";
+import { llmConfigError } from "../llm/client.js";
 
 const gameIdFor = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 12);
 
@@ -44,6 +45,8 @@ export class ComputeService {
   }
 
   createBuild({ prompt, tier, style, approval = false, gameId }) {
+    const configError = llmConfigError();
+    if (configError) throw Object.assign(new Error(configError), { status: 503 });
     const t = normalizeTier(tier);
     if (!t) throw Object.assign(new Error("tier must be 1, 2 or 3"), { status: 400 });
     if (!String(prompt || "").trim()) throw Object.assign(new Error("prompt is required"), { status: 400 });
@@ -57,6 +60,8 @@ export class ComputeService {
   }
 
   createEdit({ parentRunId, request, tier }) {
+    const configError = llmConfigError();
+    if (configError) throw Object.assign(new Error(configError), { status: 503 });
     const parent = this.store.get(parentRunId);
     if (!parent) throw Object.assign(new Error("Parent run not found"), { status: 404 });
     if (parent.status !== "complete" || !parent.result) throw Object.assign(new Error("Parent run has no finished game"), { status: 409 });
