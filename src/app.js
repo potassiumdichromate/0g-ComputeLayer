@@ -8,6 +8,7 @@ import { listStyles } from "../styles/presets.js";
 import { listRecipes } from "../recipes/index.js";
 import { harvest, listLibrary } from "./library/library.js";
 import { findBrowser } from "./qa/browser.js";
+import { publicBaseUrl, publicUrlProblem } from "./media/storage.js";
 import { tierConfig } from "./config/tiers.js";
 
 const buildSchema = z.object({
@@ -44,10 +45,10 @@ export function createApp(service) {
   };
 
   app.get("/health", (_req, res) => res.json({
-    ok: !llmConfigError(), service: "kult-compute-layer",
+    ok: !llmConfigError() && !publicUrlProblem(), service: "kult-compute-layer",
     // Render sets RENDER_GIT_COMMIT: shows which commit is actually deployed.
     version: (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "dev").slice(0, 7),
-    mock: isMockMode(), problem: llmConfigError(), browser: Boolean(findBrowser()),
+    mock: isMockMode(), problem: llmConfigError() || publicUrlProblem(), publicBaseUrl: publicBaseUrl(), browser: Boolean(findBrowser()),
     tiers: [1, 2, 3].map((t) => tierConfig(t))
   }));
 

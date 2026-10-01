@@ -7,9 +7,24 @@ import { DATA_DIR } from "../config/env.js";
 // Swap this module for R2 / 0G Storage in production: callers only use
 // put() → { url, path, sha256, bytes } and read().
 
+const isLocalUrl = (url) => /^https?:\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(String(url || ""));
+
+// Base URL for every artifact URL handed to clients (sprites, covers, games).
+// It must be reachable from creator-studio and players' browsers, so on a
+// deployed service a localhost value is ignored in favor of the public URL
+// (RENDER_EXTERNAL_URL is set automatically on Render web services).
 export function publicBaseUrl() {
-  // RENDER_EXTERNAL_URL is set automatically on Render web services.
-  return (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 4100}`).replace(/\/$/, "");
+  const configured = process.env.PUBLIC_BASE_URL;
+  const platform = process.env.RENDER_EXTERNAL_URL;
+  const base = configured && !(isLocalUrl(configured) && platform) ? configured : platform || configured || `http://localhost:${process.env.PORT || 4100}`;
+  return base.replace(/\/$/, "");
+}
+
+// A deployed service that hands out localhost URLs produces games whose art
+// never loads. Reported on /health.
+export function publicUrlProblem() {
+  if (process.env.NODE_ENV !== "production" || !isLocalUrl(publicBaseUrl())) return null;
+  return `Asset URLs point to ${publicBaseUrl()}, which players and creator-studio cannot reach. Set PUBLIC_BASE_URL to this service's public https URL.`;
 }
 
 export function sha256(buffer) {
