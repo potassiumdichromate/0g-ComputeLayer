@@ -8,7 +8,8 @@ import { DATA_DIR } from "../config/env.js";
 // put() → { url, path, sha256, bytes } and read().
 
 export function publicBaseUrl() {
-  return (process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 4100}`).replace(/\/$/, "");
+  // RENDER_EXTERNAL_URL is set automatically on Render web services.
+  return (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 4100}`).replace(/\/$/, "");
 }
 
 export function sha256(buffer) {

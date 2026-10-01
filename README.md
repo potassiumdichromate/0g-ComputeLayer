@@ -98,6 +98,26 @@ All `/v1` routes take `x-compute-key: $COMPUTE_API_KEY` when one is set.
 | `GET` | `/v1/styles`, `/v1/recipes`, `/v1/library`, `/health` | |
 | `GET` | `/play/:runId` | the playable standalone game |
 
+## Deploying on Render
+
+The repo includes a `Dockerfile` (Node 22 + Chromium for the playtest) and a
+`render.yaml` Blueprint.
+
+1. Render → **New → Blueprint** → select this repo. It creates a Docker web
+   service `kult-compute-layer` with a 5 GB disk at `/var/data`.
+2. Set the secret env vars when prompted:
+   - `COMPUTE_API_KEY`: the shared key (same value as creator-studio's `COMPUTE_LAYER_KEY`)
+   - `ZERO_G_API_KEY`: your 0G router key
+3. After deploy, open `https://<service>.onrender.com/health`. It should show
+   `"mock": false` and `"browser": true`.
+
+`PUBLIC_BASE_URL` defaults to Render's `RENDER_EXTERNAL_URL`, so sprite/cover URLs
+are reachable from creator-studio.
+
+The disk keeps runs across deploys: unfinished runs resume, and edits can find
+their parent run. A service with a disk runs as a single instance, and deploys
+briefly stop it.
+
 ## Using it from creator-studio
 
 The published `gamePackage` already has the shape creator-studio stores and plays:

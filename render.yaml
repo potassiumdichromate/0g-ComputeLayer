@@ -1,0 +1,23 @@
+# Render Blueprint: New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: kult-compute-layer
+    runtime: docker
+    # Chromium (playtest) + sharp need memory; 2 GB is comfortable.
+    plan: standard
+    healthCheckPath: /health
+    # Runs, sprites and the harvest library survive redeploys and restarts;
+    # unfinished runs resume on boot.
+    disk:
+      name: compute-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: COMPUTE_API_KEY
+        sync: false
+      - key: ZERO_G_API_KEY
+        sync: false
+      - key: ZERO_G_BASE_URL
+        value: https://router-api.0g.ai/v1
+      - key: DATA_DIR
+        value: /var/data
