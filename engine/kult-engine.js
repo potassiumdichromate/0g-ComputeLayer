@@ -15,12 +15,30 @@
   "use strict";
   if (root.KULT && root.KULT.version) return;
 
+  // The host passes the game package (title, style, sprite manifest). Games
+  // can also carry their own art in KULT_EMBEDDED (written into the code by
+  // the platform), so they render correctly even when the host hands over a
+  // package without the sprite manifest. Embedded art wins for the sprites it
+  // defines; the host keeps title and anything else.
   const PKG = (() => {
+    let host = null;
     try {
       // eslint-disable-next-line no-undef
-      if (typeof gamePackage !== "undefined" && gamePackage) return gamePackage;
+      if (typeof gamePackage !== "undefined" && gamePackage) host = gamePackage;
     } catch (e) { /* not declared */ }
-    return root.gamePackage || {};
+    host = host || root.gamePackage || {};
+    const embed = root.KULT_EMBEDDED;
+    if (!embed || typeof embed !== "object") return host;
+    const hostAssets = host.gameplayAssets || {};
+    const embedAssets = embed.gameplayAssets || {};
+    return Object.assign({}, embed, host, {
+      title: host.title || embed.title,
+      style: embed.style || host.style,
+      gameplayAssets: Object.assign({}, hostAssets, {
+        manifest: Object.assign({}, hostAssets.manifest || {}, embedAssets.manifest || {}),
+        catalog: (embedAssets.catalog && embedAssets.catalog.length ? embedAssets.catalog : hostAssets.catalog) || []
+      })
+    });
   })();
 
   // ---------------------------------------------------------------- utilities
@@ -976,7 +994,7 @@
       }
       ctx.fillText(str, x, y);
     }
-    function wrapLines(str, maxWidth, size, font) {
+    function wrapLines(str, maxWidth, size, font, maxLines) {
       setFont({ size, font: font || "ui" });
       const words = String(str).split(/\s+/).filter(Boolean);
       const lines = [];
@@ -986,7 +1004,7 @@
         if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; } else line = test;
       }
       if (line) lines.push(line);
-      return lines.slice(0, 3);
+      return maxLines ? lines.slice(0, maxLines) : lines;
     }
     function fitText(str, maxWidth, size, font, min) {
       for (let s = size; s > (min || 12); s -= 1) {
@@ -999,13 +1017,14 @@
       const key = str + "|" + maxW + "|" + maxH + "|" + ui.fontEpoch;
       if (ui.titleCache && ui.titleCache.key === key) return ui.titleCache;
       let best = null;
-      for (let size = 56; size >= 22; size -= 2) {
+      // Shrink until EVERY word fits (at most 3 lines) — never drop words.
+      for (let size = 56; size >= 16; size -= 2) {
         const lines = wrapLines(str, maxW, size, "display");
         setFont({ size, font: "display" });
         const widest = Math.max.apply(null, lines.map((l) => ctx.measureText(l).width));
-        if (widest <= maxW && lines.length * size * 1.04 <= maxH) { best = { lines, size }; break; }
+        if (lines.length <= 3 && widest <= maxW && lines.length * size * 1.04 <= maxH) { best = { lines, size }; break; }
       }
-      best = best || { lines: wrapLines(str, maxW, 22, "display"), size: 22 };
+      best = best || { lines: wrapLines(str, maxW, 16, "display", 4), size: 16 };
       ui.titleCache = Object.assign({ key }, best);
       return ui.titleCache;
     }
@@ -1263,7 +1282,7 @@
 
       const hint = config.hint || (PKG.gameplay && PKG.gameplay.controls) || "";
       if (hint) {
-        const lines = wrapLines(hint, W - 108, 13, "ui");
+        const lines = wrapLines(hint, W - 108, 13, "ui", 3);
         const ch = 18 + lines.length * 17;
         const cy = H * 0.79;
         ctx.globalAlpha = clamp((e - 0.45) / 0.3, 0, 1);
