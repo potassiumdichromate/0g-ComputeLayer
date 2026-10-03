@@ -167,7 +167,8 @@ export function smokeTest(gameCode, { gamePackage = {}, seconds = 20, seed = 123
     step(10);
     if (T().state === "play") report.metrics.reachedPlay = true;
     else report.failures.push(`Tapping start did not enter play (state "${T().state}")`);
-    if (T().entityCount === 0) report.warnings.push("Nothing is spawned when the run starts (empty screen)");
+    report.metrics.customDraw = Boolean(T().customDraw);
+    if (T().entityCount === 0 && !report.metrics.customDraw) report.warnings.push("Nothing is spawned when the run starts (empty screen)");
 
     const actions = [
       () => call(`tap(${W * 0.5}, ${H * 0.6})`),
@@ -183,9 +184,8 @@ export function smokeTest(gameCode, { gamePackage = {}, seconds = 20, seed = 123
     ];
     let t = 0, i = 0;
     const frames = Math.round(seconds * 60);
-    let firstOverFrame = null;
     while (t < frames) {
-      if (T().state === "over") { firstOverFrame = t; break; }
+      if (T().state === "over") break;
       actions[(i * 7 + 3) % actions.length]();
       i += 1;
       step(12);
@@ -194,7 +194,8 @@ export function smokeTest(gameCode, { gamePackage = {}, seconds = 20, seed = 123
     }
     if (T().state === "over") {
       report.metrics.reachedOver = true;
-      report.metrics.overAtSeconds.push(Number((firstOverFrame / 60).toFixed(1)));
+      // The game clock stops at game over, so it is the run's true length.
+      report.metrics.overAtSeconds.push(Number(T().time.toFixed(1)));
       // Must NOT auto-restart.
       step(150);
       if (T().state !== "over") report.failures.push("The game restarted by itself after game over (it must wait for a tap)");
@@ -229,7 +230,7 @@ export function smokeTest(gameCode, { gamePackage = {}, seconds = 20, seed = 123
     const m = report.metrics;
     if (report.errors.length) report.failures.push(...report.errors.map((e) => `Runtime error: ${e}`));
     if (m.peakEntities > 1500) report.failures.push(`Entity count exploded to ${m.peakEntities} (spawned objects are never removed)`);
-    if (m.reachedPlay && m.peakEntities <= 1) report.warnings.push("Only one entity ever existed — the game world looks empty");
+    if (m.reachedPlay && m.peakEntities <= 1 && !m.customDraw) report.warnings.push("Only one entity ever existed — the game world looks empty");
     if (m.reachedPlay && m.maxScore === 0) report.warnings.push("Score never changed during ~20 s of active play");
     if (m.overAtSeconds.length && Math.max(...m.overAtSeconds) < 2) report.warnings.push("The run ends in under 2 seconds — likely far too hard or an instant-death bug");
     if (m.nanDraws > 20) report.warnings.push(`${m.nanDraws} draw calls received NaN coordinates (some values are undefined)`);

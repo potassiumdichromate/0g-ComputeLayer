@@ -129,8 +129,24 @@ touch ripples and phone vibration. KULT.game options: `title`, `subtitle`, `hint
 `haptics: false`, `touchRipples: false`.
 
 ## Input (only when a movement verb does not fit)
-`g.input.pressed` (pressed this frame), `g.input.down`, `g.input.held`, `g.input.x/y` (logical),
+`g.input.pressed` (pressed this frame), `g.input.released`, `g.input.down`, `g.input.held`, `g.input.x/y` (logical),
+`g.input.startX/startY` (where the current/last press began — use with `released` for drag-and-release),
 `g.input.taps` (array of {x,y} this frame), `g.input.swipe` ("left"|"right"|"up"|"down"|null; arrow keys also set it),
 `g.input.action` (space/enter/up pressed this frame), `g.input.axis()` → {x,y}, `g.input.side` (-1|0|1),
-`g.input.key(code)`, `g.input.keyPressed(code)`.
+`g.input.key(code)`, `g.input.keyPressed(code)`, `g.input.button` (id of the g.button tapped this frame, or null).
 Every game must be fully playable by touch alone.
+
+## Building blocks for board, card, puzzle and UI-heavy games
+Use these instead of hand-rolling the same code (draw calls go inside `g.draw`, logic inside `g.update`):
+- `const grid = g.grid({ cols, rows, gap, offsetY, heightFrac })` — call in setup. Fits itself to the screen.
+  `grid.get(c, r)`, `grid.set(c, r, v)`, `grid.inside(c, r)`, `grid.toPx(c, r)` → {x,y} cell centre,
+  `grid.cellAt(px, py)` → {c,r}|null, `grid.each((v, c, r) => …)`, `grid.fillWith((c, r) => v)`, `grid.empty()`,
+  `grid.neighbors(c, r)`, `grid.cell` (cell size px), `grid.x/y/w/h`, and `grid.draw(ctx)` draws the board.
+- `g.button(id, { x, y, w, h, label, icon, color, size, font, disabled })` — draw a chunky tappable button
+  (in g.draw). A tap on it sets `g.input.button === id` for that frame (check it in g.update). Ids are yours.
+- `g.sprite(name, x, y, w, h, { rot, flipX, alpha })` — draw generated art by catalog name centred in a box
+  (keeps aspect). Returns false if that art does not exist → draw a shape instead. Use it for everything you
+  draw yourself: tiles, gems, cards, the clickable object, tower icons…
+- `g.panel(x, y, w, h, { r, fill, stroke })` — glassy rounded panel for cards, dialogs, meters.
+- `g.wrapText(str, x, y, maxW, { size, align, color, maxLines, font })` — multi-line text; returns its height.
+- `g.entityAt(x, y, tag)` — the topmost entity under a point (tap-to-select units, pieces, targets).

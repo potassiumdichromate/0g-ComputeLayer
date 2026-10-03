@@ -19,6 +19,7 @@ const HARD_RULES = [
   "- Spawn entities using the design's entity names as the type (g.spawn(\"player\", ...)), so their sprites appear automatically. For sprite entities give only `h` so the width follows the art. ALSO give each a fitting `shape` and palette `color` (and `face: true` for creatures) so it still looks good as a shape.",
   "- Use palette keys (primary, secondary, accent, danger, good, text, bg1, bg2) for every color. Do not pass palette, style or font to KULT.game. Only pass background.deco if the design's background calls for one.",
   "- Fully playable by touch alone. The `hint` explains the controls in one short sentence.",
+  "- Things you draw yourself in g.draw / g.drawBehind (boards, tiles, cards, gems, UI pieces) must use the generated art: call g.sprite(catalogName, x, y, w, h) first and draw a shape only when it returns false.",
   "- Size for a phone: the player sprite is 64–96 px tall, enemies/hazards/collectibles 40–72 px, so the art reads clearly. Never draw sprites under 32 px.",
   "- Games are portrait and fill a phone screen: do NOT pass `orientation` to KULT.game. Lay everything out relative to g.W (360) and g.H.",
   "- Difficulty must escalate over time (g.ramp, g.every with a function, g.nextLevel()).",

@@ -12,7 +12,7 @@ import { getStyle, engineStyle, STYLE_PRESETS } from "../styles/presets.js";
 import { findBrowser } from "../src/qa/browser.js";
 import { buildGameHtml } from "../src/runtime/bundle.js";
 
-const only = process.argv[2];
+const only = process.argv[2] ? process.argv[2].split(",") : null;
 const forcedStyle = process.argv[3];
 const styles = Object.keys(STYLE_PRESETS);
 const out = join(DATA_DIR, "preview-ui");
@@ -26,7 +26,7 @@ const sheets = { menu: [], play: [], paused: [], over: [] };
 try {
   let i = 0;
   for (const recipe of listRecipes()) {
-    if (only && recipe.id !== only) continue;
+    if (only && !only.includes(recipe.id)) continue;
     const styleId = forcedStyle || styles[i++ % styles.length];
     const page = await browser.newPage();
     await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1, isMobile: true, hasTouch: true });

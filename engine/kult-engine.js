@@ -296,7 +296,7 @@
     // ---------------------------------------------------------------- input
     const ACTION_KEYS = ["Space", "Enter", "ArrowUp", "KeyW", "KeyZ", "KeyX", "KeyJ"];
     const input = {
-      x: 180, y: 320, down: false, pressed: false, released: false, action: false,
+      x: 180, y: 320, down: false, pressed: false, released: false, action: false, button: null,
       swipe: null, taps: [], keys: new Set(), keysPressed: new Set(),
       startX: 0, startY: 0, startT: 0,
       get held() { return this.down || ACTION_KEYS.some((k) => this.keys.has(k)); },
@@ -339,8 +339,10 @@
         // Buttons with an action consume the press; the big PLAY / PLAY AGAIN
         // buttons fall through so "tap anywhere" keeps working.
         if (UI_ACTIONS[id]) { audio.play("click"); UI_ACTIONS[id](); return; }
+        // In-game buttons (g.button) report their id through input.button.
+        if (id.indexOf("game:") === 0) { input.button = id.slice(5); audio.play("click"); }
       }
-      if (state === "play" && config.touchRipples !== false) ui.ripples.push({ x: p.x, y: p.y, t: 0 });
+      if (state === "play" && config.touchRipples !== false && !input.button) ui.ripples.push({ x: p.x, y: p.y, t: 0 });
       input.x = p.x; input.y = p.y;
       input.down = true; input.pressed = true;
       input.startX = p.x; input.startY = p.y; input.startT = now();
@@ -395,7 +397,7 @@
       }
     }
     function endFrameInput() {
-      input.pressed = false; input.released = false; input.action = false;
+      input.pressed = false; input.released = false; input.action = false; input.button = null;
       input.swipe = null; input.taps.length = 0; input.keysPressed.clear();
     }
 
@@ -1684,6 +1686,98 @@
     };
     g.maxLives = config.lives != null ? config.lives : ((config.hud && config.hud.lives) || 0);
     g.lives = g.maxLives;
+    // ------------------------------------------------- building blocks
+    // Boards: cell math, storage and drawing for grid games (match-3, 2048,
+    // sokoban, tower defense, tactics). Create it inside setup.
+    function makeGrid(o) {
+      o = o || {};
+      const cols = Math.max(1, o.cols || 6), rows = Math.max(1, o.rows || 6), gap = o.gap || 0;
+      const cell = o.cell || Math.floor(Math.min((view.W - 24 - (cols - 1) * gap) / cols, (view.H * (o.heightFrac || 0.62) - (rows - 1) * gap) / rows));
+      const w = cols * cell + (cols - 1) * gap, h = rows * cell + (rows - 1) * gap;
+      const x0 = o.x != null ? o.x : (view.W - w) / 2;
+      const y0 = o.y != null ? o.y : (view.H - h) / 2 + (o.offsetY != null ? o.offsetY : 30);
+      const cells = new Array(cols * rows).fill(o.fill === undefined ? null : o.fill);
+      const grid = {
+        cols, rows, cell, gap, x: x0, y: y0, w, h, cells,
+        inside: (c, r) => c >= 0 && r >= 0 && c < cols && r < rows,
+        get: (c, r) => (grid.inside(c, r) ? cells[r * cols + c] : undefined),
+        set: (c, r, v) => { if (grid.inside(c, r)) cells[r * cols + c] = v; return v; },
+        toPx: (c, r) => ({ x: x0 + c * (cell + gap) + cell / 2, y: y0 + r * (cell + gap) + cell / 2 }),
+        cellAt: (px, py) => {
+          const c = Math.floor((px - x0) / (cell + gap)), r = Math.floor((py - y0) / (cell + gap));
+          return grid.inside(c, r) ? { c, r } : null;
+        },
+        each: (fn) => { for (let r = 0; r < rows; r += 1) for (let c = 0; c < cols; c += 1) fn(cells[r * cols + c], c, r); },
+        fillWith: (fn) => { for (let r = 0; r < rows; r += 1) for (let c = 0; c < cols; c += 1) cells[r * cols + c] = fn(c, r); return grid; },
+        empty: () => { const out = []; grid.each((v, c, r) => { if (v == null) out.push({ c, r }); }); return out; },
+        neighbors: (c, r) => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dc, dr]) => ({ c: c + dc, r: r + dr })).filter((q) => grid.inside(q.c, q.r)),
+        draw: (dctx, d) => {
+          d = d || {};
+          glass(x0 - 8, y0 - 8, w + 16, h + 16, 14, { fill: d.board || "rgba(10,8,30,0.55)" });
+          for (let r = 0; r < rows; r += 1) {
+            for (let c = 0; c < cols; c += 1) {
+              const px = x0 + c * (cell + gap), py = y0 + r * (cell + gap);
+              roundRect(px + 1, py + 1, cell - 2, cell - 2, Math.min(10, cell * 0.18));
+              ctx.fillStyle = d.cell || ((c + r) % 2 ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.11)");
+              ctx.fill();
+            }
+          }
+        }
+      };
+      return grid;
+    }
+    // Tappable in-game button, drawn from g.draw(...). A tap on it sets
+    // g.input.button to its id for that frame (check it in g.update).
+    function gameButton(id, o) {
+      o = o || {};
+      button("game:" + id, o.x, o.y, o.w || 120, o.h || 48, {
+        label: o.label, icon: o.icon, color: o.color || "accent", size: o.size, font: o.font,
+        radius: o.radius, variant: o.variant, states: ["play"], hit: !o.disabled, scale: o.disabled ? 0.96 : 1
+      });
+      if (o.disabled) {
+        ctx.fillStyle = "rgba(10,8,24,0.55)";
+        roundRect(o.x - (o.w || 120) / 2, o.y - (o.h || 48) / 2, o.w || 120, o.h || 48, o.radius != null ? o.radius : (o.h || 48) / 2);
+        ctx.fill();
+      }
+    }
+    // Draws a generated sprite inside a box (keeps its aspect). Returns false
+    // when that art does not exist or is still loading, so callers can draw a
+    // shape instead.
+    function drawSprite(name, x, y, w, h, o) {
+      if (!name || !assets.ready(name)) return false;
+      const img = assets.get(name);
+      const a = img.naturalWidth / img.naturalHeight;
+      const bw = Math.min(w, h * a), bh = bw / a;
+      ctx.save();
+      ctx.translate(x, y);
+      if (o && o.rot) ctx.rotate(o.rot);
+      if (o && o.flipX) ctx.scale(-1, 1);
+      if (o && o.alpha != null) ctx.globalAlpha *= o.alpha;
+      ctx.drawImage(img, -bw / 2, -bh / 2, bw, bh);
+      ctx.restore();
+      return true;
+    }
+    function entityAt(x, y, tag) {
+      const list = entities.filter((e) => !e.dead && (!tag || e.tags.has(tag))).sort((a, b) => b.z - a.z);
+      return list.find((e) => Math.abs(e.x - x) <= e.w / 2 && Math.abs(e.y - y) <= e.h / 2) || null;
+    }
+    function wrapText(str, x, y, maxW, o) {
+      o = o || {};
+      const size = o.size || 16;
+      const lines = wrapLines(str, maxW, size, o.font || "ui", o.maxLines);
+      const lh = size * (o.lineHeight || 1.28);
+      lines.forEach((line, i) => text(line, x, y + i * lh, Object.assign({ baseline: "middle", shadow: false }, o, { size })));
+      return lines.length * lh;
+    }
+    Object.assign(g, {
+      grid: makeGrid,
+      button: gameButton,
+      panel: (x, y, w, h, o) => glass(x, y, w, h, (o && o.r) || 14, o),
+      sprite: drawSprite,
+      entityAt,
+      wrapText
+    });
+
     root.__KULT_GAME__ = g;
 
     // ----------------------------------------------------------- lifecycle
@@ -1719,6 +1813,7 @@
       get level() { return g.level; },
       get errors() { return errors.slice(); },
       get entityCount() { return entities.length; },
+      get customDraw() { return Boolean(hooks.draw || hooks.drawBehind); },
       count: (tag) => g.count(tag),
       types() { const out = {}; for (const e of entities) out[e.type] = (out[e.type] || 0) + 1; return out; },
       boot,

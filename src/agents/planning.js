@@ -136,8 +136,15 @@ export const designer = {
 
 export function defaultDesign(b, prompt) {
   const recipe = getRecipe(b.recipe) ?? getRecipe("runner");
-  const types = [...new Set([...recipeCode(recipe.id).matchAll(/spawn\("([a-z_]+)"/g)].map((m) => m[1]))];
-  const structural = new Set(["gate", "platform", "bullet", "enemy_bullet", "brick", "paddle", "ball"]);
+  const code = recipeCode(recipe.id);
+  // Entities the recipe spawns, plus art it draws itself with g.sprite("name")
+  // (board, card and UI games draw instead of spawning).
+  const spawned = [...code.matchAll(/spawn\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  const drawn = [...code.matchAll(/g\.sprite\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  const listed = [...code.matchAll(/const (?:KINDS|NAMES) = \[([^\]]*)\]/g)].flatMap((m) => [...m[1].matchAll(/"([a-z0-9_]+)"/g)].map((x) => x[1])).slice(0, 5);
+  drawn.push(...listed);
+  const types = [...new Set(["player", ...spawned, ...drawn])].slice(0, 10);
+  const structural = new Set(["gate", "platform", "bullet", "enemy_bullet", "brick", "paddle", "ball", "ground", "hook", "arrow", "shot", "orb", "slash", "bolt"]);
   return GameDesign.parse({
     title: b.title, pitch: b.pitch || String(prompt).slice(0, 200), recipe: recipe.id, orientation: b.orientation,
     controls: { touch: "", keyboard: "", hint: "" },
