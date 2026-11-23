@@ -23,7 +23,9 @@ const PROMPTS = [
   "connect four against a robot",
   "klondike solitaire card game",
   "catch falling sushi and avoid the wasabi bombs",
-  "a top-down racing game around a city track with drifting"
+  "a top-down racing game around a city track with drifting",
+  "a 3D endless runner where a ninja dodges trains on rooftops",
+  "stack the swinging blocks as high as you can, one tap to drop"
 ];
 
 const tier = Number(process.argv[2]) || 1;

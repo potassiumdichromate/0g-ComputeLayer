@@ -50,8 +50,8 @@ async function judge(ctx, capture, design, catalog) {
         role: "system",
         content: [
           "You are the QA lead of a mobile game studio reviewing screenshots of a game on a 390x844 phone.",
-          "Score visuals (polish, cohesion), readability (can a player tell what is what, is the HUD clear) and fidelity (does it look like THE GAME THE CREATOR ASKED FOR, not merely the design text) from 0-10. A different kind of game wearing the requested theme gets fidelity 0-2 and is an issue. The start menu is drawn over a live preview of the board, which is expected.",
-          "List ONLY real, fixable problems a player would clearly notice: blank or frozen screen, nothing happening after start, key entities missing or unreadable, sprites stretched/tiny/facing wrong, overlapping or cut-off text, things off-screen, visible glitches, runtime errors that break play.",
+          "Score visuals (polish, cohesion), readability (can a player tell what is what, is the HUD clear) and fidelity (does it look like THE GAME THE CREATOR ASKED FOR, not merely the design text) from 0-10. A different kind of game wearing the requested theme gets fidelity 0-2 and is an issue. The start menu is drawn over a live preview of the board, which is expected. A translucent pointing hand with a short label in the first seconds of play is the built-in tutorial, which is expected too.",
+          "List ONLY real, fixable problems a player would clearly notice: blank or frozen screen, nothing happening after start, key entities missing or unreadable, sprites stretched/tiny/facing wrong, overlapping or cut-off text, things off-screen, visible glitches, runtime errors that break play, and a game that feels dead (player input causes no visible reaction, scoring has no feedback).",
           "Do not report taste or balance. pass = true when there are no such problems.",
           'Reply ONLY with JSON: {"pass":true|false,"scores":{"visuals":0-10,"readability":0-10,"fidelity":0-10},"issues":["specific, fixable"]}'
         ].join("\n")

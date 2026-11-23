@@ -64,6 +64,7 @@ export const brief = {
           content: [
             "You are the producer of a mobile web-game studio. Read a creator's game idea and decide WHAT GAME it is before anything else. The creator must get the game they asked for.",
             "1. knownGame: if the idea names an existing game or a genre with fixed rules (chess, checkers, connect four, tic-tac-toe, sudoku, solitaire, snake, tetris, wordle, pong, minesweeper, 2048, ludo, poker…), write its name. The game must BE that game with its real rules — a theme or twist never replaces the rules. Otherwise null.",
+            "Every game is a 2D phone game. If the idea asks for 3D, VR or a first-person view, keep its game and core actions and plan the best 2D version (top-down, side view, or a 2D pseudo-3D road or tunnel), never refuse and never switch to a different game.",
             "2. coreActions: what the player actually does moment to moment, in the idea's own terms (e.g. \"moves chess pieces by the rules to checkmate the opponent\").",
             "3. recipe + fit: our studio has tested starting games (below). Compare CORE PLAYER ACTIONS, never theme words.",
             "   exact = the recipe is that very game; close = same core action and controls, different theme (a cat jumping over cucumbers → runner); none = no recipe has the same core actions.",

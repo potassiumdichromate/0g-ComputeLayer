@@ -252,6 +252,14 @@
     let flashFx = null;
     let levelBanner = null;
     let prevBest = 0;
+    let hitstopT = 0;
+    // First-play tutorial: an animated hand showing the gesture of the player's
+    // movement verb, until the first input or TUT_LIFE seconds.
+    const GESTURES = { runner: "tap", flap: "tap", lanes: "swipe", drag: "drag", topdown: "drag", platformer: "hold" };
+    const TUT_TEXT = { tap: "Tap to play", swipe: "Swipe to move", drag: "Drag to move", hold: "Hold left or right", runner: "Tap to jump", flap: "Tap to flap", lanes: "Swipe to change lane" };
+    const TUT_LIFE = 3.6;
+    const tut = { gesture: null, kind: null, t: 0, done: false };
+    let runBest = 0, bestCheered = false;
     let lastT = now();
     let started = false;
     const hooks = { setup: config.setup || null, update: config.update || null, draw: config.draw || null, drawBehind: config.drawBehind || null, onLevel: config.onLevel || null, onStart: config.onStart || null, onOver: config.onOver || null };
@@ -487,6 +495,7 @@
     Entity.prototype.moves = function (kind, opts) {
       const make = BEHAVIORS[kind];
       if (!make) { recordError(new Error("Unknown movement '" + kind + "'"), "moves"); return this; }
+      if (!tut.gesture && GESTURES[kind]) { tut.gesture = GESTURES[kind]; tut.kind = kind; }
       this.brains.push(make(this, opts || {}));
       return this;
     };
@@ -1187,6 +1196,50 @@
       if (filled) { ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.beginPath(); ctx.ellipse(-3.2, -3.6, 1.8, 1.2, -0.6, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
     }
+    // A cartoon pointing hand (fingertip at 0,0), for the first-play tutorial.
+    function hand(x, y, s, pressed) {
+      ctx.save(); ctx.translate(x, y); ctx.scale(s / 48, s / 48); ctx.rotate(-0.35);
+      const k = pressed ? 0.9 : 1; ctx.scale(k, k);
+      ctx.lineWidth = 4; ctx.lineJoin = "round"; ctx.strokeStyle = "rgba(14,10,32,0.95)"; ctx.fillStyle = "#ffffff";
+      roundRect(-7, -2, 14, 34, 7); ctx.fill(); ctx.stroke();
+      roundRect(-15, 20, 34, 30, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(14,10,32,0.18)"; roundRect(-4, 2, 8, 6, 3); ctx.fill();
+      ctx.restore();
+    }
+    function drawTutorial() {
+      if (config.tutorial === false || tut.done || state !== "play") return;
+      const opt = typeof config.tutorial === "object" ? config.tutorial : {};
+      const gesture = opt.gesture || tut.gesture;
+      if (!gesture) return;
+      const W = view.W, H = view.H, t = tut.t;
+      const a = clamp(Math.min(t / 0.25, (TUT_LIFE - t) / 0.4), 0, 1);
+      if (a <= 0) return;
+      const cx = W / 2, cy = opt.y != null ? opt.y : H * 0.5;
+      const phase = (t % 1.2) / 1.2;
+      ctx.save(); ctx.globalAlpha = a;
+      let hx = cx, hy = cy, pressed = false;
+      if (gesture === "tap") {
+        pressed = phase > 0.45 && phase < 0.7;
+        hy = cy + (pressed ? 0 : -10 * Math.sin(phase * Math.PI));
+        if (pressed) { ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, 14 + (phase - 0.45) * 120, 0, Math.PI * 2); ctx.stroke(); }
+      } else if (gesture === "swipe") {
+        const dir = Math.floor(t / 1.2) % 2 ? -1 : 1;
+        hx = cx + dir * lerp(-70, 70, EASE.inOut(phase)); pressed = true;
+        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 6; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(cx - dir * 70, cy); ctx.lineTo(hx, cy); ctx.stroke();
+      } else if (gesture === "drag") {
+        hx = cx + Math.sin(t * 2.4) * 80; hy = cy + Math.sin(t * 4.8) * 18; pressed = true;
+      } else if (gesture === "hold") {
+        const side = Math.floor(t / 1.2) % 2 ? 1 : -1;
+        hx = cx + side * W * 0.28; pressed = phase > 0.2;
+        ctx.fillStyle = "rgba(255,255,255," + (pressed ? 0.14 : 0.06) + ")";
+        ctx.fillRect(side < 0 ? 0 : W / 2, cy - 80, W / 2, 160);
+      }
+      hand(hx, hy, 52, pressed);
+      const label = String(opt.text || (!opt.gesture && TUT_TEXT[tut.kind]) || TUT_TEXT[gesture] || "").toUpperCase();
+      if (label) chip(label, cx, cy + 74, { size: 14, color: pal.primary, fill: alpha(shade(pal.bg1, -0.5), 0.8) });
+      ctx.restore();
+    }
     function overlay(a) {
       ctx.fillStyle = "rgba(8,6,20," + a + ")";
       ctx.fillRect(-10, -10, view.W + 20, view.H + 20);
@@ -1429,6 +1482,7 @@
       }
       ctx.globalAlpha = 1;
       drawLevelBanner();
+      drawTutorial();
       if (state === "play" || state === "paused") drawHud();
       if (flashFx && flashFx.a > 0) { ctx.globalAlpha = flashFx.a; ctx.fillStyle = flashFx.color; ctx.fillRect(-10, -10, view.W + 20, view.H + 20); ctx.globalAlpha = 1; }
       if (state === "menu") drawMenu();
@@ -1454,6 +1508,7 @@
       cam.x = 0; cam.y = 0; cam.target = null; cam.shakeT = 0; flashFx = null; levelBanner = null;
       bg.speedX = bg.baseSpeedX || 0; bg.speedY = bg.baseSpeedY || 0; bg.offX = 0; bg.offY = 0;
       comboState.n = 0; comboState.t = 0;
+      hitstopT = 0; tut.t = 0; tut.done = false; runBest = g.best; bestCheered = false;
       ui.shownScore = 0; ui.lastScore = 0; ui.scoreBump = 0; ui.newBest = false; ui.ripples = [];
       inSetup = true;
       safe(hooks.setup, "setup", g);
@@ -1476,8 +1531,21 @@
         if (input.pressed || input.action) setState("play");
       } else if (state === "over") {
         if (stateT > 0.7 && (input.pressed || input.action)) startPlay();
+      } else if (state === "play" && hitstopT > 0) {
+        hitstopT -= dt;
       } else if (state === "play") {
         g.time += dt;
+        if (!tut.done) {
+          tut.t += dt;
+          if (tut.t > 0.35 && (input.pressed || input.swipe || input.action)) tut.t = Math.max(tut.t, TUT_LIFE - 0.4);
+          if (tut.t >= TUT_LIFE) tut.done = true;
+        }
+        if (!bestCheered && runBest > 0 && g.score > runBest) {
+          bestCheered = true;
+          floatText(cam.x + view.W / 2, cam.y + 130, "NEW BEST!", "primary", 30);
+          burst(cam.x + view.W / 2, cam.y + 120, { color: [pal.primary, pal.accent, pal.good], count: 30, speed: 260, gravity: 260, life: 1 });
+          audio.play("power"); buzz(25);
+        }
         for (const tm of timers.slice()) {
           if (tm.done) continue;
           tm.acc += dt;
@@ -1634,10 +1702,22 @@
         return g.score;
       },
       combo() { return comboState.n; },
+      // y below the engine's HUD (score, best, lives, level, hud.set lines, combo):
+      // game-drawn labels, buttons and boards start here so nothing overlaps.
+      get safeTop() {
+        if (config.hud === false) return 12;
+        const hud = config.hud || {};
+        let y = 30;
+        if (hud.lives !== false && g.maxLives > 0) y += 38;
+        if (hud.level) y += 32;
+        y += 32 * Object.keys(hudValues).length;
+        return Math.max(104, y - 8);
+      },
+      hitstop(seconds) { hitstopT = Math.max(hitstopT, clamp(Number(seconds) || 0.06, 0, 0.25)); return g; },
       loseLife(opts) {
         if (state !== "play") return g.lives;
         g.lives -= 1;
-        shake(8, 0.3); flash("danger", 0.3); audio.play("hit"); buzz(40);
+        shake(8, 0.3); flash("danger", 0.3); audio.play("hit"); buzz(40); hitstopT = Math.max(hitstopT, 0.07);
         if (g.lives <= 0) g.over(opts);
         return g.lives;
       },

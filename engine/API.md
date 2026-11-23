@@ -105,7 +105,14 @@ Enemies can shoot too: `enemy.shoots({ every: 1.5, dir: player, type: "enemy_bul
 - `g.shake(amount = 6, seconds = 0.22)`, `g.flash(color, alpha)`, `g.floatText(x, y, text, color, size)`.
 - `g.sfx(name)` — jump, flap, coin, pop, shoot, hit, explode, bounce, power, level, win, lose, click.
 - `g.tween(obj, { x: 100, scale: 1.4 }, seconds, "out"|"in"|"inOut"|"back"|"elastic"|"linear", onDone)`.
+- `g.hitstop(0.06)` — freeze the action for a split second on a big impact (a smash, a boss hit, a perfect catch). `loseLife` already does it.
 - Entities pop in when spawned, squash on jump/land, flash on hit, and blink while invulnerable automatically.
+- Automatic: an animated hand shows the gesture (tap / swipe / drag / hold) for the first seconds of every run, taken from
+  the player's movement verb; a "NEW BEST!" burst fires the moment the run passes the best score.
+  For games without a movement verb set it yourself: `KULT.game({ tutorial: { gesture: "tap"|"swipe"|"drag"|"hold", text: "Tap a column" } })`,
+  or `tutorial: false` to turn it off.
+- Feel checklist for every game: something reacts to EVERY player input (sound + squash/burst/float text), each score
+  has a floatText at its position, big moments get shake + burst (+ hitstop), and difficulty visibly ramps (`g.ramp`, `g.nextLevel`).
 
 ## Camera and background
 - `g.follow(entity, { x: false, y: true, onlyUp: true, anchorY: 0.6, lerp: 8 })` — for climbers/scrollers.
@@ -115,6 +122,9 @@ Enemies can shoot too: `enemy.shoots({ every: 1.5, dir: player, type: "enemy_bul
 
 ## HUD and drawing
 - `g.hud.set("Ammo", 5)` — extra HUD line. Score, best, lives, pause and mute are automatic.
+- `g.safeTop` — the y just below the engine HUD (about 104+). Anything you draw near the top of the screen (labels,
+  turn indicators, timers, your own buttons, the top of a board) starts at or below `g.safeTop`; never draw text above it.
+  Keep bottom-of-screen controls above `g.H - 24`.
 - `g.draw((ctx, g) => {})` — extra drawing above entities; `g.drawBehind((ctx, g) => {})` — below them.
   Both run in logical coordinates. Subtract `g.camera.x/y` for world positions.
   `g.text(str, x, y, { size, color, align, baseline, font: "display" | "ui", gradient: [top, bottom] })` draws outlined
