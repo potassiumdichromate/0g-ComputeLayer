@@ -10,6 +10,56 @@ const here = dirname(fileURLToPath(import.meta.url));
 // pass `npm run test:recipes`.
 export const RECIPES = [
   {
+    id: "chess", name: "Chess vs computer", verbs: ["grid", "tap-select", "turns", "ai"],
+    keywords: ["chess", "checkmate", "chessboard", "chess board", "grandmaster"],
+    summary: "Real chess against an AI: every legal move, check, checkmate, stalemate, castling, en passant, promotion; tap a piece then a highlighted square; undo; each win starts a new game against a deeper-searching AI."
+  },
+  {
+    id: "checkers", name: "Checkers / draughts vs computer", verbs: ["grid", "tap-select", "turns", "ai"],
+    keywords: ["checkers", "draughts", "dama"],
+    summary: "8x8 checkers against an AI: diagonal moves, forced captures, multi-jump chains, kings on the last row; win by taking or blocking every enemy piece; each win raises the AI level."
+  },
+  {
+    id: "connect4", name: "Connect four vs computer", verbs: ["grid", "tap-column", "turns", "ai"],
+    keywords: ["connect four", "connect 4", "four in a row", "4 in a row", "drop discs"],
+    summary: "7x6 drop-disc board against an AI: tap a column to drop a disc with gravity, four in a row (any direction) wins; the AI looks ahead more each level."
+  },
+  {
+    id: "tictactoe", name: "Tic-tac-toe vs computer", verbs: ["grid", "tap-cell", "turns", "ai"],
+    keywords: ["tic tac toe", "tic-tac-toe", "tictactoe", "noughts and crosses", "x and o", "xo game"],
+    summary: "3x3 X vs O against an AI that blocks and sets traps (perfect at higher levels); rounds with a running score, win line animation."
+  },
+  {
+    id: "snake", name: "Snake", verbs: ["grid", "swipe-steer"],
+    keywords: ["snake game", "classic snake", "nokia snake", "slither", "worm game", "eat and grow"],
+    summary: "Grid snake: swipe or arrows to steer, eat food to grow and score, speed rises with length, golden bonus food on a timer, hitting a wall or yourself ends the run."
+  },
+  {
+    id: "memory", name: "Memory match", verbs: ["grid", "tap-flip"],
+    keywords: ["memory", "memory game", "match pairs", "matching pairs", "pairs", "concentration", "flip cards", "card flip"],
+    summary: "Flip two cards at a time to find matching pairs; matches stay up, misses flip back; fewer moves and a fast clear score more; bigger boards each level, a timer that ends the run."
+  },
+  {
+    id: "minesweeper", name: "Minesweeper", verbs: ["grid", "tap-reveal", "flag"],
+    keywords: ["minesweeper", "mine sweeper", "mines", "minefield", "bomb grid"],
+    summary: "Tap to reveal cells, numbers count neighbouring mines, empty areas flood open, flag mode toggle, the first tap is always safe; clear every safe cell to win, bigger fields each level."
+  },
+  {
+    id: "blocks", name: "Falling blocks", verbs: ["grid", "swipe", "tap-rotate"],
+    keywords: ["tetris", "falling blocks", "tetromino", "tetrominoes", "block puzzle", "line clear", "stack blocks"],
+    summary: "Falling tetromino puzzle on a 10x20 well: swipe left/right to move, tap to rotate, swipe down to drop; full rows clear for points, speed rises every 10 lines, next-piece preview, stacking to the top ends the run."
+  },
+  {
+    id: "wordguess", name: "Word guess", verbs: ["keyboard buttons", "rows"],
+    keywords: ["wordle", "word guess", "guess the word", "word game", "five letter", "5 letter", "word puzzle"],
+    summary: "Guess the hidden 5-letter word in 6 tries with an on-screen keyboard; tiles turn green (right spot), yellow (in the word) or grey; streaks score more; a themed word list."
+  },
+  {
+    id: "pong", name: "Pong / paddle duel", verbs: ["drag", "ai"],
+    keywords: ["pong", "table tennis", "ping pong", "air hockey", "paddle duel"],
+    summary: "Drag your paddle along the bottom to return the ball past the AI paddle at the top; the ball speeds up every hit, first to 7 wins the round and the AI gets faster each level."
+  },
+  {
     id: "flappy", name: "Flappy / tap-to-fly", verbs: ["flap"],
     keywords: ["flappy", "flap", "fly", "bird", "helicopter", "wings", "tap to fly", "gap", "pipes", "balloon", "bee", "dragon fly"],
     summary: "One-button flight through scrolling gaps. Gravity + flap impulse, obstacles scroll left, score per gate passed, instant death on hit."
@@ -95,7 +145,7 @@ export const RECIPES = [
     summary: "Notes fall down 4 lanes to a hit line on a BPM grid with a metronome; tap the lane in time; perfect/good/miss, combo multiplier, health drains on misses, tempo and chords increase per level."
   },
   {
-    id: "racer", name: "Top-down racer / endless driving", verbs: ["steer", "scrolling road"],
+    id: "racer", name: "Endless road driving (one scrolling road, no laps, no circuit)", verbs: ["steer", "scrolling road"],
     keywords: ["racer", "racing", "race", "top-down racer", "driving", "drive", "highway", "car", "cars", "road", "road trip", "rally", "kart", "motorbike", "fuel", "traffic"],
     summary: "Free steering on an endless winding road seen from above; overtake traffic, stay off the grass (it slows you), collect coins, refuel before the tank runs dry; speed climbs."
   },
@@ -173,8 +223,63 @@ export function recipeCode(id) {
   return readFileSync(join(here, `${id}.game.js`), "utf8");
 }
 
+// Known games with fixed rules. When a prompt names one, the game must BE that
+// game: the brief can never route "chess" to a battle game again. Games with no
+// recipe are still named so the designer and engineer implement the real rules.
+export const KNOWN_GAMES = [
+  { name: "chess", recipe: "chess", re: /\bchess\b|checkmate/ },
+  { name: "checkers", recipe: "checkers", re: /\bcheckers\b|\bdraughts\b/ },
+  { name: "connect four", recipe: "connect4", re: /connect[ -]?(four|4)|(four|4) in a row/ },
+  { name: "tic-tac-toe", recipe: "tictactoe", re: /tic[ -]?tac[ -]?toe|noughts and crosses/ },
+  { name: "snakes and ladders", recipe: null, re: /snakes? (and|&) ladders/ },
+  { name: "snake", recipe: "snake", re: /\bsnake game\b|\bclassic snake\b|\bnokia snake\b|^\s*(make |create |build )?(me )?(a |an )?snake\s*(game)?\s*$/ },
+  { name: "memory match", recipe: "memory", re: /\bmemory (game|match|cards)\b|match(ing)? pairs|\bconcentration game\b/ },
+  { name: "minesweeper", recipe: "minesweeper", re: /mine ?sweeper/ },
+  { name: "falling blocks (tetris-like)", recipe: "blocks", re: /\btetris\b|tetromino|falling blocks?\b/ },
+  { name: "word guess (wordle-like)", recipe: "wordguess", re: /\bwordle\b|guess the (\w+ )?word|five[ -]letter word|5[ -]letter word/ },
+  { name: "hangman", recipe: null, re: /\bhangman\b/ },
+  { name: "pong", recipe: "pong", re: /\bpong\b|ping[ -]?pong|table tennis|air hockey/ },
+  { name: "2048", recipe: "merge2048", re: /\b2048\b/ },
+  { name: "sokoban", recipe: "sokoban", re: /\bsokoban\b/ },
+  { name: "match-3", recipe: "match3", re: /match[ -]?(3|three)\b|candy crush|bejeweled/ },
+  { name: "breakout", recipe: "breakout", re: /\bbreakout\b|arkanoid|brick breaker/ },
+  { name: "flappy", recipe: "flappy", re: /\bflappy\b/ },
+  { name: "space invaders", recipe: "shooter", re: /space invaders/ },
+  { name: "pinball", recipe: "pinball", re: /\bpinball\b/ },
+  { name: "tower defense", recipe: "towerdefense", re: /tower defen[cs]e/ },
+  { name: "sudoku", recipe: null, re: /\bsudoku\b/ },
+  { name: "solitaire (klondike)", recipe: null, re: /\bsolitaire\b|\bklondike\b/ },
+  { name: "pac-man-like maze chase", recipe: null, re: /pac[ -]?man/ },
+  { name: "ludo", recipe: null, re: /\bludo\b/ },
+  { name: "battleship", recipe: null, re: /\bbattleships?\b/ },
+  { name: "reversi / othello", recipe: null, re: /\breversi\b|\bothello\b/ },
+  { name: "gomoku (five in a row)", recipe: null, re: /\bgomoku\b|five in a row/ },
+  { name: "blackjack", recipe: null, re: /\bblackjack\b/ },
+  { name: "poker", recipe: null, re: /\bpoker\b/ },
+  { name: "crossword", recipe: null, re: /\bcrossword\b/ },
+  { name: "word search", recipe: null, re: /word search/ },
+  { name: "mahjong solitaire", recipe: null, re: /\bmahjong\b/ },
+  { name: "bubble shooter", recipe: null, re: /bubble (shooter|pop(per)?)\b|puzzle bobble/ },
+  { name: "dots and boxes", recipe: null, re: /dots and boxes/ },
+  { name: "nonogram / picross", recipe: null, re: /\bnonogram\b|\bpicross\b/ }
+];
+
+// The known game a text names (a prompt, or the brief's knownGame), or null.
+export function matchKnownGame(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t.trim()) return null;
+  const hit = KNOWN_GAMES.find((k) => k.re.test(t) || t.trim() === k.name);
+  if (!hit) return null;
+  return { name: hit.name, recipe: hit.recipe && listRecipes().some((r) => r.id === hit.recipe) ? hit.recipe : null };
+}
+
 // Cheap deterministic match used as the fallback when the brief agent fails.
 export function matchRecipe(prompt) {
+  return scoreRecipe(prompt).recipe ?? getRecipe("runner");
+}
+
+// Best keyword match with its score (0 = nothing matched: no recipe fits).
+export function scoreRecipe(prompt) {
   const text = String(prompt || "").toLowerCase();
   let best = null;
   let bestScore = 0;
@@ -186,5 +291,5 @@ export function matchRecipe(prompt) {
     if (has(recipe.id)) score += 1;
     if (score > bestScore) { best = recipe; bestScore = score; }
   }
-  return best ?? getRecipe("runner");
+  return { recipe: best, score: bestScore };
 }

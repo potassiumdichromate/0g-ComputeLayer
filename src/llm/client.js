@@ -1,4 +1,10 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import { mockChat, mockImage } from "./mock.js";
+
+// Node's built-in fetch gives up when response headers take over 5 minutes;
+// a model that thinks for a long time before its first token (Opus writing a
+// whole game) can take longer. Our own per-call timer is the limit instead.
+const longCalls = new Agent({ headersTimeout: 0, bodyTimeout: 0, keepAliveTimeout: 30_000 });
 
 // 0G router client. Claude models are served on the Anthropic Messages format
 // (/messages); every other model on the OpenAI chat format. Responses are
@@ -141,6 +147,43 @@ async function errorFromResponse(response) {
   return error;
 }
 
+// Models that reject a temperature (or accept only 1) are remembered after
+// their first refusal, so every later call is sent in the shape they accept.
+const TEMPERATURE_RULES = new Map();
+function temperatureFor(model, wanted) {
+  const rule = TEMPERATURE_RULES.get(model);
+  if (rule === "omit") return undefined;
+  if (rule === "one") return 1;
+  return wanted;
+}
+function learnTemperature(model, error) {
+  const msg = String(error?.message ?? "");
+  if (error?.status !== 400 || !/temperature/i.test(msg) || TEMPERATURE_RULES.has(model)) return false;
+  TEMPERATURE_RULES.set(model, /only 1 is allowed|must be 1/i.test(msg) ? "one" : "omit");
+  return true;
+}
+
+// Newer Claude models refuse `thinking: { type: "disabled" }` (they think
+// adaptively, and the router rejects the request — for some only when the
+// prompt is long). For them the setting is dropped and max_tokens gets
+// headroom for the hidden reasoning, so JSON and code are never cut off.
+const THINKS_ALWAYS = /^claude-(opus|sonnet|haiku|fable)-5[.-]5|^claude-fable-/i;
+const NO_DISABLE = new Set();
+// Models that always think spend part of max_tokens on thinking before the
+// first word of the answer, so they get headroom on top of the answer budget:
+// a whole game from Opus once used all 32K on thinking and returned no code.
+function thinkingFor(model, thinking, maxTokens) {
+  const thinks = THINKS_ALWAYS.test(model) || NO_DISABLE.has(model);
+  const headroom = thinks ? Math.min(128000, maxTokens + Math.max(8000, Math.min(maxTokens, 32000))) : maxTokens;
+  if (thinking?.type === "disabled" && thinks) return { thinking: undefined, maxTokens: headroom };
+  return { thinking, maxTokens: thinks ? headroom : maxTokens };
+}
+function learnThinking(model, thinking, error) {
+  if (error?.status !== 400 || thinking?.type !== "disabled" || NO_DISABLE.has(model)) return false;
+  NO_DISABLE.add(model);
+  return true;
+}
+
 const retriable = (error) => !error.status || error.status === 408 || error.status === 429 || error.status >= 500;
 
 /**
@@ -157,6 +200,7 @@ export async function chat(options) {
   }
   const { apiKey, baseUrl } = clientConfig();
   let lastError;
+  let budget = maxTokens;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (signal?.aborted) throw new Error("Cancelled");
     const controller = new AbortController();
@@ -165,22 +209,29 @@ export async function chat(options) {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const anthropic = isAnthropic(model);
-      const response = await fetch(`${baseUrl}${anthropic ? "/messages" : "/chat/completions"}`, {
+      const response = await undiciFetch(`${baseUrl}${anthropic ? "/messages" : "/chat/completions"}`, {
         method: "POST",
+        dispatcher: longCalls,
         signal: controller.signal,
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", ...(anthropic ? { "anthropic-version": "2023-06-01" } : {}) },
         body: JSON.stringify(anthropic
-          ? toAnthropicBody({ model, messages, maxTokens, thinking })
-          : { model, messages, temperature, max_tokens: maxTokens, stream: true })
+          ? toAnthropicBody({ model, messages, ...thinkingFor(model, thinking, budget) })
+          : { model, messages, temperature: temperatureFor(model, temperature), max_tokens: budget, stream: true })
       });
       if (!response.ok) throw await errorFromResponse(response);
       const result = anthropic ? await streamAnthropic(response, onChunk) : await streamOpenAI(response, onChunk);
-      if (!result.content) { const e = new Error("0G returned no message content"); e.status = 502; throw e; }
+      if (!result.content) { const e = new Error(`0G returned no message content (stop: ${result.finishReason ?? "unknown"})`); e.status = result.finishReason === "refusal" ? 422 : 502; throw e; }
       return { model, ...result, ms: Date.now() - started };
     } catch (original) {
       let error = original;
+      // undici reports a dropped stream as "fetch failed" / "terminated"; keep the cause.
+      if (error?.cause && /fetch failed|terminated/i.test(error.message)) error = new Error(`${error.message}: ${error.cause.code || error.cause.message || error.cause}`);
       if (error.name === "AbortError") { error = new Error(signal?.aborted ? "Cancelled" : `0G request timed out after ${timeoutMs}ms`); error.status = signal?.aborted ? 499 : 504; }
       lastError = error;
+      if (learnTemperature(model, error)) { attempt -= 1; continue; }
+      if (isAnthropic(model) && learnThinking(model, thinking, error)) { attempt -= 1; continue; }
+      // All of the budget went on thinking: the same request would fail the same way, so double it.
+      if (/no message content \(stop: length\)/.test(error.message) && budget < 64000) { budget = Math.min(64000, budget * 2); attempt -= 1; continue; }
       if (attempt >= retries || !retriable(error) || signal?.aborted) throw error;
       await sleep(1000 * 2 ** attempt);
     } finally {

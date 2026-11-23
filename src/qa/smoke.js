@@ -1,5 +1,5 @@
 import vm from "node:vm";
-import { engineSource } from "../runtime/bundle.js";
+import { engineSource, stripModuleSyntax } from "../runtime/bundle.js";
 
 // Headless acceptance test. Runs engine + game code inside a mocked browser in
 // a Node VM, then drives the game through the engine's __KULT_TEST__ hook the
@@ -89,15 +89,6 @@ function makeWindow({ width = 390, height = 844, seed = 1234 } = {}) {
   return { win, stats, logs, listeners };
 }
 
-function stripModuleSyntax(code) {
-  return String(code || "")
-    .replace(/^[ \t]*import\s+[^;\n]*from\s+["'][^"']*["'];?[ \t]*$/gm, "")
-    .replace(/^[ \t]*import\s+["'][^"']*["'];?[ \t]*$/gm, "")
-    .replace(/^[ \t]*export\s+default\s+/gm, "")
-    .replace(/^[ \t]*export\s*\{[^}]*\}[ \t]*;?[ \t]*$/gm, "")
-    .replace(/^([ \t]*)export\s+(const|let|var|function|class|async)/gm, "$1$2");
-}
-
 export function checkSyntax(gameCode) {
   try {
     new vm.Script(stripModuleSyntax(gameCode), { filename: "game.js" });
@@ -106,6 +97,20 @@ export function checkSyntax(gameCode) {
     const line = String(error.stack || "").match(/game\.js:(\d+)/)?.[1];
     return { message: error.message, line: line ? Number(line) : null };
   }
+}
+
+// A loaded game in a mocked browser, for scripted bots (scripts/test-bots.mjs).
+export function loadHeadless(gameCode, { gamePackage = {}, seed = 1234 } = {}) {
+  const { win, stats, logs } = makeWindow({ seed });
+  const context = vm.createContext(win);
+  const source = `var gamePackage = ${JSON.stringify(gamePackage)};
+${engineSource()}
+;(function(){
+${stripModuleSyntax(gameCode)}
+})();`;
+  const run = (code, timeout = 2500) => vm.runInContext(code, context, { timeout, filename: "harness.js" });
+  run(source, 4000);
+  return { win, stats, logs, run, test: () => win.__KULT_TEST__, game: () => win.__KULT_GAME__ };
 }
 
 /**

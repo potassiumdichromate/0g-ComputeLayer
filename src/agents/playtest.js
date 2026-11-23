@@ -24,10 +24,13 @@ export async function inlineManifest(assets) {
 }
 
 async function judge(ctx, capture, design, catalog) {
+  const request = ctx.run.kind === "edit" ? `${ctx.run.base?.prompt ?? ""} (latest change: ${ctx.input.prompt})` : ctx.input.prompt;
   const content = [
     {
       type: "text",
       text: [
+        `THE CREATOR ASKED FOR: ${request}`,
+        design.knownGame ? `That is ${design.knownGame}: it must look and play like ${design.knownGame}.` : "",
         `Game: ${design.title} — ${design.pitch}`,
         `Core loop: ${design.coreLoop}`,
         `Controls: ${design.controls?.hint ?? ""}`,
@@ -41,13 +44,13 @@ async function judge(ctx, capture, design, catalog) {
     ...capture.shots.map((s) => ({ type: "image_url", image_url: { url: `data:image/png;base64,${s.png.toString("base64")}` } }))
   ];
   const { value } = await askJson({
-    llm: ctx.llm, role: "judge", purpose: "judge", schema: JudgeVerdict, maxTokens: 1200, temperature: 0.1,
+    llm: ctx.llm, role: "judge", purpose: "judge", schema: JudgeVerdict, maxTokens: 6000, temperature: 0.1,
     messages: [
       {
         role: "system",
         content: [
           "You are the QA lead of a mobile game studio reviewing screenshots of a game on a 390x844 phone.",
-          "Score visuals (polish, cohesion), readability (can a player tell what is what, is the HUD clear) and fidelity (does it look like the described game) from 0-10.",
+          "Score visuals (polish, cohesion), readability (can a player tell what is what, is the HUD clear) and fidelity (does it look like THE GAME THE CREATOR ASKED FOR, not merely the design text) from 0-10. A different kind of game wearing the requested theme gets fidelity 0-2 and is an issue. The start menu is drawn over a live preview of the board, which is expected.",
           "List ONLY real, fixable problems a player would clearly notice: blank or frozen screen, nothing happening after start, key entities missing or unreadable, sprites stretched/tiny/facing wrong, overlapping or cut-off text, things off-screen, visible glitches, runtime errors that break play.",
           "Do not report taste or balance. pass = true when there are no such problems.",
           'Reply ONLY with JSON: {"pass":true|false,"scores":{"visuals":0-10,"readability":0-10,"fidelity":0-10},"issues":["specific, fixable"]}'
@@ -84,14 +87,14 @@ export const playtester = {
     const base = { screenshots, verdict, errors: first.errors, state: first.state };
     if (verdict.pass && !hardErrors.length && !first.blank) return { ...base, status: "passed", code: qa.code };
 
-    const issues = [...verdict.issues, ...hardErrors, ...(first.blank ? ["The screen is blank during play"] : [])];
+    const issues = [...verdict.issues, ...hardErrors, ...(first.blank ? ["The screen is blank during play"] : []), ...(verdict.scores.fidelity < 6 ? [`The game does not look like what the creator asked for: "${ctx.input.prompt}"`] : [])];
     if (!issues.length) return { ...base, status: "failed", code: qa.code };
     ctx.progress({ stage: "fixing playtest issues", issues: issues.length });
     const reply = await ctx.llm.chat({
-      role: "repair", purpose: "repair", maxTokens: 16000, temperature: 0.3, timeoutMs: 10 * 60_000,
+      role: "repair", purpose: "repair", maxTokens: 32000, temperature: 0.3, timeoutMs: 12 * 60_000,
       messages: [
         { role: "system", content: ["You fix a KULT Engine game after a visual playtest on a phone. Fix ONLY the listed problems; keep all gameplay, entities and features. Return the complete corrected code only, no fences.", "", engineApiReference()].join("\n") },
-        { role: "user", content: ["PLAYTEST PROBLEMS:", ...issues.map((i) => `- ${i}`), "", "CODE:", "```js", qa.code, "```"].join("\n") }
+        { role: "user", content: [`CREATOR'S REQUEST: ${ctx.input.prompt}`, "PLAYTEST PROBLEMS:", ...issues.map((i) => `- ${i}`), "", "CODE:", "```js", qa.code, "```"].join("\n") }
       ]
     }).catch((error) => ({ error }));
     if (reply.error) return { ...base, status: "failed", fixError: reply.error.message, code: qa.code };

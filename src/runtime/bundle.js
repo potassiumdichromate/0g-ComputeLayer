@@ -22,8 +22,20 @@ export function engineApiReference() {
 // The module shape creator-studio's player already runs: its sandbox declares
 // `const gamePackage = {...}` and then executes this code with imports
 // stripped. The engine reads gamePackage (sprites, style, title) from there.
+// Game code runs in its own function scope, exactly as the headless QA runs
+// it: a top-level `const top` or `let document` would otherwise collide with
+// the browser's own globals and stop the game before its first frame.
+export function stripModuleSyntax(code) {
+  return String(code || "")
+    .replace(/^[ \t]*import\s+[^;\n]*from\s+["'][^"']*["'];?[ \t]*$/gm, "")
+    .replace(/^[ \t]*import\s+["'][^"']*["'];?[ \t]*$/gm, "")
+    .replace(/^[ \t]*export\s+default\s+/gm, "")
+    .replace(/^[ \t]*export\s*\{[^}]*\}[ \t]*;?[ \t]*$/gm, "")
+    .replace(/^([ \t]*)export\s+(const|let|var|function|class|async)/gm, "$1$2");
+}
+
 export function buildGameModule(gameCode) {
-  return `${engineSource()}\n\n// ---- game ----\n${String(gameCode || "").trim()}\n`;
+  return `${engineSource()}\n\n// ---- game ----\n;(function () {\n${stripModuleSyntax(gameCode).trim()}\n})();\n`;
 }
 
 // A self-contained page (used by the playtester and the /play route). Asset

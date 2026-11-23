@@ -1258,9 +1258,12 @@
       rg.addColorStop(0, alpha(pal.secondary, 0.5)); rg.addColorStop(1, alpha(pal.secondary, 0));
       ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(W / 2, heroY, glowR, 0, Math.PI * 2); ctx.fill();
       const heroIn = EASE.back(clamp((e - 0.15) / 0.5, 0, 1));
-      if (heroIn > 0.01) {
+      // config.hero: false hides the mascot, a function draws a custom one at
+      // (0,0) — board and puzzle games show a piece instead of a blob.
+      if (heroIn > 0.01 && config.hero !== false) {
         ctx.save(); ctx.translate(W / 2, heroY + Math.sin(t * 2.4) * 6); ctx.scale(heroIn, heroIn);
-        drawHero(0, 0, 96);
+        if (typeof config.hero === "function") { try { config.hero(ctx, g, 96); } catch (error) { recordError(error, "hero"); } }
+        else drawHero(0, 0, 96);
         ctx.restore();
       }
 
@@ -1774,6 +1777,7 @@
       button: gameButton,
       panel: (x, y, w, h, o) => glass(x, y, w, h, (o && o.r) || 14, o),
       sprite: drawSprite,
+      hasSprite: (name) => Boolean(name && assets.ready(name)),
       entityAt,
       wrapText
     });
@@ -1836,6 +1840,9 @@
         }
       },
       render() { try { render(); } catch (error) { recordError(error, "render"); } },
+      // The game's own on-screen buttons (g.button) in the current state, so a
+      // test player can press "EASY" or "ROLL" the way a person would.
+      buttons: () => ui.hits.filter((b) => !UI_ACTIONS[b.id] && b.states.indexOf(state) !== -1).map((b) => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })),
       view: () => ({ W: view.W, H: view.H })
     };
     return g;

@@ -38,20 +38,21 @@ export async function mockChat({ purpose, messages }) {
   const { defaultDesign } = await import("../agents/planning.js");
   const all = messages.map((m) => flatten(m.content)).join("\n");
   const last = flatten(messages[messages.length - 1]?.content);
-  const prompt = (between(all, "PROMPT:\n", "\n\n") ?? "").trim();
-  const recipe = all.match(/\[\[recipe:([a-z0-9_-]+)\]\]/)?.[1] ?? matchRecipe(prompt).id;
+  const prompt = (between(all, "IDEA:\n", "\n\n") ?? between(all, "PROMPT:\n", "\n\n") ?? "").trim();
+  const seeded = all.match(/\[\[recipe:([a-z0-9_-]+)\]\]/)?.[1];
+  const recipe = seeded ?? all.match(/\[\[reference:([a-z0-9_-]+)\]\]/)?.[1] ?? matchRecipe(prompt).id;
 
   switch (purpose) {
     case "brief": {
       const words = prompt.replace(/[^a-zA-Z ]/g, " ").split(/\s+/).filter((w) => w.length > 3).slice(0, 2);
       return JSON.stringify({
         title: words.length ? words.map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") + " Rush" : "Mock Game",
-        pitch: prompt.slice(0, 160), genre: "arcade", recipe: matchRecipe(prompt).id, style: inferStyle(prompt), orientation: "portrait"
+        pitch: prompt.slice(0, 160), genre: "arcade", recipe: matchRecipe(prompt).id, fit: "close", knownGame: null, coreActions: prompt.slice(0, 120), style: inferStyle(prompt), orientation: "portrait"
       });
     }
     case "designer": {
       const b = jsonAfter(all, "BRIEF:") ?? { title: "Mock Game" };
-      return JSON.stringify(defaultDesign({ ...b, recipe, orientation: "portrait" }, prompt));
+      return JSON.stringify(defaultDesign({ ...b, recipe: seeded ?? null, fit: seeded ? "close" : "none", orientation: "portrait" }, prompt));
     }
     case "artDirector": {
       const design = jsonAfter(all, "GAME DESIGN:") ?? { entities: [] };
@@ -70,10 +71,15 @@ export async function mockChat({ purpose, messages }) {
       return recipeCode(recipe);
     case "engineerEdit":
       return between(all, "CURRENT GAME CODE:\n```js\n", "\n```") ?? recipeCode(recipe);
+    case "fidelity-fix":
     case "repair":
       return between(all, "CODE:\n```js\n", "\n```") ?? recipeCode(recipe);
     case "judge":
       return JSON.stringify({ pass: true, scores: { visuals: 7, readability: 8, fidelity: 7 }, issues: [] });
+    case "fidelity":
+      return JSON.stringify({ matches: true, score: 8, gameIs: "the requested game (mock review)", missing: [], bugs: [] });
+    case "brief-check":
+      return "YES";
     case "copywriter":
       return JSON.stringify({ description: "A mock game generated offline. Tap to play.", howToPlay: "Tap to play.", tags: [recipe, "mock"], category: "Arcade" });
     case "editRouter": {

@@ -64,10 +64,22 @@ export async function captureGame({ gamePackage, gameCode, viewport = { width: 3
     await shoot("1 second into play");
     const view = await T("__KULT_TEST__.view()") ?? { W: 360, H: 700 };
     const plan = [[0.5, 0.6], [0.25, 0.7], [0.75, 0.7], [0.5, 0.5], [0.3, 0.65], [0.7, 0.65]];
+    // Press the game's own buttons too (difficulty pickers, ROLL, DEAL...),
+    // trying each id once before repeating, between taps on the play area.
+    const pressed = new Set();
     for (let i = 0; i < 12; i += 1) {
-      const [x, y] = plan[i % plan.length];
-      await T(`__KULT_TEST__.tap(${view.W * x}, ${view.H * y})`);
+      const buttons = (i % 2 === 0 ? await T("__KULT_TEST__.buttons ? __KULT_TEST__.buttons() : []") : null) || [];
+      const button = buttons.find((b) => !pressed.has(b.id)) || (buttons.length && i % 4 === 0 ? buttons[i % buttons.length] : null);
+      if (button) {
+        pressed.add(button.id);
+        await T(`__KULT_TEST__.tap(${button.x}, ${button.y})`);
+      } else {
+        const [x, y] = plan[i % plan.length];
+        await T(`__KULT_TEST__.tap(${view.W * x}, ${view.H * y})`);
+      }
       if (i % 3 === 0) await page.keyboard.press(i % 2 ? "ArrowLeft" : "ArrowRight");
+      // Swipes steer snake-likes and lane games the way a phone player would.
+      if (i % 3 === 1) await T(`__KULT_TEST__.swipe(${JSON.stringify(["right", "down", "left", "up"][Math.floor(i / 3) % 4])})`);
       await wait(220);
     }
     await shoot("about 4 seconds of active play");

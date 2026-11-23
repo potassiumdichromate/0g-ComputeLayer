@@ -125,7 +125,8 @@ Enemies can shoot too: `enemy.shoots({ every: 1.5, dir: player, type: "enemy_bul
 The engine draws a styled start menu (title, hero, PLAY button, controls hint, best score), the HUD
 (score, best, lives, level, combo meter, pause and sound buttons), a pause panel (resume / restart / sound),
 the game-over card (score, new-best confetti, time, level, PLAY AGAIN / home), level banners, fade transitions,
-touch ripples and phone vibration. KULT.game options: `title`, `subtitle`, `hint`, `lives`, `hud: { level: true }`,
+touch ripples and phone vibration. KULT.game options: `title`, `subtitle`, `hint`, `lives`, `hud: { level: true }`, `hero` (start-menu mascot: omit for the
+player sprite, `false` for none, or `(ctx, g, size) => {}` to draw one centred at 0,0 — e.g. a chess king),
 `haptics: false`, `touchRipples: false`.
 
 ## Input (only when a movement verb does not fit)
@@ -147,6 +148,7 @@ Use these instead of hand-rolling the same code (draw calls go inside `g.draw`, 
 - `g.sprite(name, x, y, w, h, { rot, flipX, alpha })` — draw generated art by catalog name centred in a box
   (keeps aspect). Returns false if that art does not exist → draw a shape instead. Use it for everything you
   draw yourself: tiles, gems, cards, the clickable object, tower icons…
+- `g.hasSprite(name)` — true when that generated art exists (decide between art and drawn shapes up front).
 - `g.panel(x, y, w, h, { r, fill, stroke })` — glassy rounded panel for cards, dialogs, meters.
 - `g.wrapText(str, x, y, maxW, { size, align, color, maxLines, font })` — multi-line text; returns its height.
 - `g.entityAt(x, y, tag)` — the topmost entity under a point (tap-to-select units, pieces, targets).

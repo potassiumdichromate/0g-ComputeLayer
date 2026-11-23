@@ -17,7 +17,15 @@ export const Brief = z.object({
   title: text(60).catch("Untitled Game"),
   pitch: text(300).catch(""),
   genre: text(60).catch("arcade"),
-  recipe: z.string().catch("runner"),
+  recipe: z.string().nullable().catch(null),
+  // How well the recipe's core actions match the prompt: exact = it IS that
+  // game, close = same core action with a different theme, none = no recipe
+  // fits and the game is written from scratch.
+  fit: z.enum(["exact", "close", "none"]).catch("none"),
+  // A known game or genre with fixed rules the prompt asks for (chess, snake…).
+  knownGame: text(60).nullable().catch(null),
+  // What the player actually does, in the prompt's own terms.
+  coreActions: text(300).catch(""),
   style: z.string().catch("cartoon"),
   orientation: z.enum(["portrait", "landscape"]).catch("portrait")
 });
@@ -36,7 +44,7 @@ export const DesignEntity = z.object({
 export const GameDesign = z.object({
   title: text(60),
   pitch: text(300).catch(""),
-  recipe: z.string().catch(""),
+  recipe: z.string().nullable().catch(null),
   orientation: z.enum(["portrait", "landscape"]).catch("portrait"),
   controls: z.object({ touch: text(200).catch(""), keyboard: text(200).catch(""), hint: text(140).catch("") }),
   coreLoop: text(500).catch(""),
@@ -89,6 +97,15 @@ export const JudgeVerdict = z.object({
     fidelity: z.coerce.number().min(0).max(10).catch(5)
   }).catch({ visuals: 5, readability: 5, fidelity: 5 }),
   issues: z.array(text(300)).max(8).catch([])
+});
+
+// Does the built game match what the creator asked for? Read from the code.
+export const FidelityVerdict = z.object({
+  matches: z.boolean().catch(false),
+  score: z.coerce.number().min(0).max(10).catch(5),
+  gameIs: text(200).catch(""),
+  missing: z.array(text(300)).max(10).catch([]),
+  bugs: z.array(text(300)).max(10).catch([])
 });
 
 export const Copy = z.object({

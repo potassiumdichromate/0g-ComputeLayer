@@ -3,18 +3,22 @@
 // and every feature with TIER<n>_<FEATURE> (e.g. TIER2_SPRITES=image).
 // Model ids are whatever the 0G router serves.
 
+// Models picked from what the 0G router serves (checked 2026-11-23): Claude for
+// planning and code (strongest at long, correct game code), GPT-6 Astra as the
+// second opinion for repairs (a different model family catches different
+// mistakes), Gemini for vision review, Seedream 5.0 for sprites and scenes.
 const DEFAULTS = {
   1: {
     models: {
-      brief: "deepseek-v4-flash",
-      designer: "glm-5",
-      artDirector: "glm-5",
-      illustrator: "glm-5",
-      engineer: "gpt-5.6-terra",
-      repair: "gpt-5.6-sol",
-      judge: "qwen3-vl-30b",
-      copywriter: "deepseek-v4-flash",
-      editRouter: "deepseek-v4-flash",
+      brief: "claude-haiku-5.5",
+      designer: "kimi-k3",
+      artDirector: "kimi-k3",
+      illustrator: "kimi-k3",
+      engineer: "gpt-6-astra",
+      repair: "claude-sonnet-5.5",
+      judge: "qwen3-vl-plus",
+      copywriter: "claude-haiku-5.5",
+      editRouter: "claude-haiku-5.5",
       image: "z-image-turbo"
     },
     features: {
@@ -22,40 +26,41 @@ const DEFAULTS = {
       environment: "image",   // none | image
       cover: "image",         // none | image
       playtest: false,        // headless browser screenshots + vision judge
-      repairAttempts: 1,
-      maxSprites: 3,
+      repairAttempts: 2,
+      fidelityPasses: 1,      // code review against the request + targeted rewrites
+      maxSprites: 4,
       approval: false         // pause for style approval
     }
   },
   2: {
     models: {
-      brief: "deepseek-v4-flash",
-      designer: "gpt-5.6-terra",
-      artDirector: "gpt-5.6-terra",
-      illustrator: "claude-opus-4-8",
-      engineer: "claude-opus-4-8",
-      repair: "gpt-5.6-sol",
-      judge: "qwen3.7-plus",
-      copywriter: "deepseek-v4-flash",
-      editRouter: "deepseek-v4-flash",
-      image: "z-image-turbo"
+      brief: "claude-sonnet-5.5",
+      designer: "claude-sonnet-5.5",
+      artDirector: "claude-sonnet-5.5",
+      illustrator: "claude-sonnet-5.5",
+      engineer: "claude-sonnet-5.5",
+      repair: "gpt-6-astra",
+      judge: "gemini-3.6-flash",
+      copywriter: "claude-haiku-5.5",
+      editRouter: "claude-sonnet-5.5",
+      image: "bytedance/seedream-5.0-flash"
     },
-    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 2, maxSprites: 5, approval: false }
+    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 2, fidelityPasses: 1, maxSprites: 6, approval: false }
   },
   3: {
     models: {
-      brief: "minimax-m3",
-      designer: "claude-opus-4-8",
-      artDirector: "claude-opus-5",
-      illustrator: "claude-opus-5",
-      engineer: "claude-opus-5",
-      repair: "gpt-5.6-terra",
-      judge: "kimi-k3",
-      copywriter: "deepseek-v4-flash",
-      editRouter: "deepseek-v4-flash",
-      image: "z-image-turbo"
+      brief: "claude-opus-5.5",
+      designer: "claude-opus-5.5",
+      artDirector: "claude-opus-5.5",
+      illustrator: "claude-opus-5.5",
+      engineer: "claude-opus-5.5",
+      repair: "gpt-6-astra",
+      judge: "gemini-3.1-pro-preview",
+      copywriter: "claude-sonnet-5.5",
+      editRouter: "claude-sonnet-5.5",
+      image: "bytedance/seedream-5.0-flash"
     },
-    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 3, maxSprites: 7, approval: false }
+    features: { sprites: "image", environment: "image", cover: "image", playtest: true, repairAttempts: 3, fidelityPasses: 2, maxSprites: 8, approval: false }
   }
 };
 

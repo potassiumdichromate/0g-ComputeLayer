@@ -37,8 +37,8 @@ export const publisher = {
       id: gameId,
       tier: "prompt-agent",
       title: design.title,
-      templateId: `kult-${design.recipe}`,
-      templateName: `KULT Engine · ${design.recipe}`,
+      templateId: `kult-${design.recipe ?? "custom"}`,
+      templateName: `KULT Engine · ${design.recipe ?? (design.knownGame || "original")}`,
       category: copy.category || "Arcade",
       description: copy.description || design.pitch,
       tags: copy.tags ?? [],
@@ -63,6 +63,8 @@ export const publisher = {
         validation: [
           qa.report?.ok ? "Headless acceptance test passed" : "Headless acceptance test FAILED",
           qa.source === "recipe-fallback" ? "Shipped the tested recipe because generated code failed QA" : null,
+          qa.fidelity && !qa.fidelity.error ? `Request fidelity ${qa.fidelity.score}/10${qa.fidelity.matches ? "" : " (does not fully match the request)"}` : null,
+          qa.quirks?.length ? `Known quirks: ${qa.quirks.join("; ")}` : null,
           play?.status ? `Browser playtest: ${play.status}` : "Browser playtest skipped"
         ].filter(Boolean)
       },
@@ -72,6 +74,8 @@ export const publisher = {
         parentRunId: run.parentRunId ?? null,
         qualityTier: run.input.tier,
         recipe: design.recipe,
+        fit: design.fit ?? null,
+        knownGame: design.knownGame ?? null,
         design,
         provenance
       },
@@ -84,6 +88,8 @@ export const publisher = {
 
     const quality = {
       codeSource: qa.source,
+      route: { recipe: design.recipe ?? null, fit: design.fit ?? null, knownGame: design.knownGame ?? null },
+      fidelity: qa.fidelity && !qa.fidelity.error ? qa.fidelity : null,
       acceptance: { ok: qa.report?.ok ?? false, warnings: qa.report?.warnings ?? [], metrics: qa.report?.metrics ?? null, repairs: (qa.history?.length ?? 1) - 1, rejected: qa.rejected ?? null },
       playtest: play?.skipped ? { status: "skipped", reason: play.reason ?? null } : { status: play?.status, verdict: play?.afterVerdict ?? play?.verdict, screenshots: play?.screenshots ?? [] }
     };

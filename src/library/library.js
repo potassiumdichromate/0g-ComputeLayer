@@ -13,7 +13,7 @@ export async function harvest({ run, rating, notes = "" }) {
   const pkg = run.result?.package;
   const code = run.result?.gameCode;
   if (!pkg || !code) throw Object.assign(new Error("Run has no finished game to harvest"), { status: 409 });
-  const recipe = run.result.recipe;
+  const recipe = run.result.recipe ?? "custom";
   const dir = join(LIB_DIR, recipe);
   await mkdir(dir, { recursive: true });
   const entry = { runId: run.id, recipe, title: pkg.title, prompt: run.input.prompt, rating: Number(rating), notes, code, createdAt: Date.now() };

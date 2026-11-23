@@ -1,6 +1,6 @@
 import { Brief, GameDesign, ArtDirection, Copy, EditPlan } from "../contracts/index.js";
 import { askJson } from "../llm/json.js";
-import { listRecipes, getRecipe, matchRecipe, recipeCode } from "../../recipes/index.js";
+import { listRecipes, getRecipe, recipeCode, matchKnownGame, scoreRecipe } from "../../recipes/index.js";
 import { getStyle, inferStyle, listStyles, STYLE_PRESETS } from "../../styles/presets.js";
 
 // Planning agents: turn one sentence into a buildable, typed plan.
@@ -13,8 +13,22 @@ import { getStyle, inferStyle, listStyles, STYLE_PRESETS } from "../../styles/pr
 const ENGINE_CAPABILITIES = [
   "The KULT Engine (2D canvas, portrait 360 x ~700 logical px) provides built in: start/pause/game-over menus, tap-to-restart, score/best/lives HUD, particles, screen shake, floating score text, synthesized sound effects, sprite rendering, collisions, a scrolling decorated background, a following camera, levels with banners.",
   "Movement verbs available: runner (auto-run + jump/double jump), platformer (steer + jump), flap (tap to fly), topdown (virtual joystick), drag (entity follows finger), lanes (swipe between lanes), chase (steer toward target), patrol, sine (oscillate), fall (drop down screen), wander. Any entity can shoot projectiles automatically or on tap.",
-  "Anything else (grids, custom rules, special abilities, bosses, power-ups, timers) is written as game logic on top."
+  "Board, card, puzzle and UI games: g.grid (cell math + drawing), g.button (tappable buttons), g.panel, g.wrapText, g.sprite, tap lists and swipes. Turn-based games with a computer opponent (minimax or heuristics), word games with on-screen keyboards, timers and rounds are all normal game logic.",
+  "Anything else (grids, custom rules, special abilities, bosses, power-ups, timers, AI opponents) is written as game logic on top."
 ].join("\n");
+
+// Settles what game is being made. A named known game always wins (chess is
+// chess), a recipe is used only when it really fits, otherwise the game is
+// written from scratch (fit "none", no recipe).
+export function resolveRoute(prompt, value = {}, { trustPrompt = true } = {}) {
+  const known = matchKnownGame(value.knownGame) ?? (trustPrompt ? matchKnownGame(prompt) : null);
+  if (known) {
+    return { knownGame: known.name, recipe: known.recipe, fit: known.recipe ? "exact" : "none" };
+  }
+  const fit = ["exact", "close", "none"].includes(value.fit) ? value.fit : "none";
+  const recipe = fit !== "none" && getRecipe(value.recipe) ? value.recipe : null;
+  return { knownGame: value.knownGame || null, recipe, fit: recipe ? fit : "none" };
+}
 
 function tuningKeys(recipeId) {
   try {
@@ -37,43 +51,63 @@ function titleFromPrompt(prompt) {
 
 // ------------------------------------------------------------------ brief
 export const brief = {
-  retries: 0,
-  timeoutMs: 90_000,
+  retries: 1,
+  timeoutMs: 2 * 60_000,
   async run(ctx) {
     const { prompt } = ctx.input;
     const forcedStyle = getStyle(ctx.input.style) ? ctx.input.style : null;
     const { value } = await askJson({
-      llm: ctx.llm, role: "brief", purpose: "brief", schema: Brief, maxTokens: 900, temperature: 0.3,
+      llm: ctx.llm, role: "brief", purpose: "brief", schema: Brief, maxTokens: 1200, temperature: 0.2,
       messages: [
         {
           role: "system",
           content: [
-            "You are the producer of a mobile web-game studio. Read a one-line game idea and route it.",
-            "Choose the recipe whose CORE PLAYER ACTION is closest to the idea (mechanic fit beats theme words).",
-            "Choose the art style that best fits the theme" + (forcedStyle ? ` — the creator already picked "${forcedStyle}", use it.` : "."),
-            "Invent a short, catchy, ORIGINAL title (max 4 words; never reuse a famous game's name).",
-            'Return ONLY JSON: {"title","pitch" (one exciting sentence),"genre","recipe","style","orientation":"portrait"|"landscape"}',
+            "You are the producer of a mobile web-game studio. Read a creator's game idea and decide WHAT GAME it is before anything else. The creator must get the game they asked for.",
+            "1. knownGame: if the idea names an existing game or a genre with fixed rules (chess, checkers, connect four, tic-tac-toe, sudoku, solitaire, snake, tetris, wordle, pong, minesweeper, 2048, ludo, poker…), write its name. The game must BE that game with its real rules — a theme or twist never replaces the rules. Otherwise null.",
+            "2. coreActions: what the player actually does moment to moment, in the idea's own terms (e.g. \"moves chess pieces by the rules to checkmate the opponent\").",
+            "3. recipe + fit: our studio has tested starting games (below). Compare CORE PLAYER ACTIONS, never theme words.",
+            "   exact = the recipe is that very game; close = same core action and controls, different theme (a cat jumping over cucumbers → runner); none = no recipe has the same core actions.",
+            "   If the idea depends on a structure the recipe does not have (laps around a closed track, corners to drift through, a map to explore, a turn order, a deck of cards), the fit is none even when the theme words match.",
+            "   When in doubt choose none — the team then builds the game from scratch, which is far better than shipping a different game. A chess idea is never a battle game; a puzzle idea set in space is never a shooter. recipe is null when fit is none.",
+            "4. style: the art style that best fits the theme" + (forcedStyle ? ` — the creator already picked "${forcedStyle}", use it.` : "."),
+            "5. title: short, catchy, ORIGINAL (max 4 words; never a famous game's trademarked name). pitch: one exciting sentence that says what the player does.",
+            'Return ONLY JSON: {"title","pitch","genre","knownGame":string|null,"coreActions","recipe":string|null,"fit":"exact"|"close"|"none","style","orientation":"portrait"}',
             "Recipes:",
             ...listRecipes().map((r) => `- ${r.id}: ${r.name} — ${r.summary}`),
             "Styles:",
-            ...listStyles().map((s) => `- ${s.id}: ${s.description}`),
-            "orientation is always \"portrait\" (games run full screen on phones)."
+            ...listStyles().map((s) => `- ${s.id}: ${s.description}`)
           ].join("\n")
         },
-        { role: "user", content: `PROMPT:\n${prompt}\n\n` }
+        { role: "user", content: `IDEA:\n${prompt}\n\n` }
       ]
     });
+    // The idea names a known game the producer did not pick: ask once whether
+    // the creator wants that game itself ("chess") or only uses it as a theme
+    // ("a runner dodging chess pieces").
+    const fromPrompt = matchKnownGame(prompt);
+    let trustPrompt = true;
+    if (fromPrompt && matchKnownGame(value.knownGame)?.name !== fromPrompt.name) {
+      const reply = await ctx.llm.chat({
+        role: "brief", purpose: "brief-check", maxTokens: 20, temperature: 0, retries: 1, timeoutMs: 45_000,
+        messages: [{ role: "user", content: `A creator asked for this game: "${prompt}"
+Do they want to play ${fromPrompt.name} itself (its real rules, maybe with a theme or twist)? Or is ${fromPrompt.name} only a theme or object inside a different kind of game? Answer only YES (it is ${fromPrompt.name}) or NO (different game).` }]
+      }).catch(() => null);
+      trustPrompt = !reply || !/^\W*no(?![a-z])/i.test(String(reply.content));
+    }
     return {
       ...value,
-      recipe: getRecipe(value.recipe) ? value.recipe : matchRecipe(prompt).id,
+      ...resolveRoute(prompt, value, { trustPrompt }),
+      orientation: "portrait",
       style: forcedStyle ?? (getStyle(value.style) ? value.style : inferStyle(prompt))
     };
   },
   async fallback(ctx) {
     const { prompt } = ctx.input;
+    const scored = scoreRecipe(prompt);
+    const route = resolveRoute(prompt, { recipe: scored.score >= 2 ? scored.recipe?.id : null, fit: scored.score >= 2 ? "close" : "none" });
     return {
-      title: titleFromPrompt(prompt), pitch: String(prompt).slice(0, 200), genre: "arcade",
-      recipe: matchRecipe(prompt).id,
+      title: titleFromPrompt(prompt), pitch: String(prompt).slice(0, 200), genre: route.knownGame ?? "arcade",
+      coreActions: String(prompt).slice(0, 200), ...route,
       style: getStyle(ctx.input.style) ? ctx.input.style : inferStyle(prompt),
       orientation: "portrait"
     };
@@ -86,24 +120,35 @@ export const designer = {
   timeoutMs: 4 * 60_000,
   async run(ctx) {
     const b = ctx.out("brief");
-    const recipe = getRecipe(b.recipe);
+    const recipe = b.fit !== "none" ? getRecipe(b.recipe) : null;
+    const family = recipe
+      ? [
+          b.fit === "exact"
+            ? `- This IS our tested ${recipe.name} game: keep its complete rules and structure, and design the creator's theme, look, names and tuning on top. Name entities after the pieces/objects that game shows.`
+            : `- Closest tested game with the same core action: ${recipe.id} (${recipe.summary}). Build on its controls and structure, but where the idea differs the IDEA wins.`,
+          `  Its tunable parameters today: ${tuningKeys(recipe.id) || "(free)"}`
+        ]
+      : [
+          "- No template: this game is written from scratch, so design EXACTLY the game in the idea — its real rules, board/layout, turns, win and lose conditions, opponent AI if it has an opponent.",
+          b.knownGame ? `- It is ${b.knownGame}: specify its COMPLETE real rules (every piece/card/move type, special rules, scoring, end conditions). Nothing simplified away.` : ""
+        ];
     const { value } = await askJson({
-      llm: ctx.llm, role: "designer", purpose: "designer", schema: GameDesign, maxTokens: 3500, temperature: 0.55,
+      llm: ctx.llm, role: "designer", purpose: "designer", schema: GameDesign, maxTokens: 6000, temperature: 0.45,
       messages: [
         {
           role: "system",
           content: [
             "You are the lead game designer of a studio famous for instantly fun, polished mobile games.",
             "Turn the brief into a complete, BUILDABLE game design document. The programmer implements exactly what you write, so be concrete: numbers, counts, speeds, timings.",
+            "THE IDEA IS THE CONTRACT: the creator must instantly recognise the game they asked for. Never swap the requested game for a different genre, and never drop a mechanic the idea names.",
             "Design principles you always follow:",
             "- The core action is understood in 3 seconds and feels good on the first tap.",
             "- Clear goal, clear failure, and a reason to try again (score chase, near misses, combos).",
             "- Risk vs reward: the best rewards sit next to danger.",
             "- Difficulty escalates in concrete steps (speed, spawn rate, new enemy types) — list them in progression.",
-            "- 3 to 7 entities total. Every entity has a distinct role, look, and interaction. Name them in snake_case, and the controlled character MUST be named \"player\".",
-            "- Only design what the engine + a few hundred lines of game logic can build well. Mechanic family to build on:",
-            `  ${recipe.id}: ${recipe.summary}`,
-            `  Its tunable parameters today: ${tuningKeys(recipe.id) || "(free)"}`,
+            "- 3 to 7 entities total. Every entity has a distinct role, look, and interaction. Name them in snake_case, and the controlled character (or the player's main piece) MUST be named \"player\". Board, card and puzzle games list their pieces/cards/tiles as entities.",
+            "- Only design what the engine + a few hundred lines of game logic can build well.",
+            ...family.filter(Boolean),
             "- Feedback moments (juice): list the moments that get particles, shake, flashes, floating text or sounds.",
             "- Controls must work with touch alone; the hint is one short sentence shown on the start screen.",
             "",
@@ -117,16 +162,16 @@ export const designer = {
         {
           role: "user",
           content: [
-            `PROMPT:\n${ctx.input.prompt}\n`,
-            `BRIEF: ${JSON.stringify({ title: b.title, pitch: b.pitch, genre: b.genre, orientation: b.orientation })}`,
-            `Recipe to build on: ${recipe.id} [[recipe:${recipe.id}]]`,
+            `IDEA:\n${ctx.input.prompt}\n`,
+            `BRIEF: ${JSON.stringify({ title: b.title, pitch: b.pitch, genre: b.genre, knownGame: b.knownGame, coreActions: b.coreActions, orientation: b.orientation })}`,
+            recipe ? `Tested game to build on: ${recipe.id} [[recipe:${recipe.id}]] (fit: ${b.fit})` : "Built from scratch (no template).",
             "Keep the title from the brief unless it is weak."
           ].join("\n")
         }
       ]
     });
     // Every game ships portrait (the player frame is a tall phone screen).
-    return { ...value, recipe: recipe.id, orientation: "portrait" };
+    return { ...value, recipe: recipe?.id ?? null, fit: recipe ? b.fit : "none", knownGame: b.knownGame ?? null, coreActions: b.coreActions ?? "", orientation: "portrait" };
   },
   async fallback(ctx) {
     const b = ctx.out("brief");
@@ -135,7 +180,20 @@ export const designer = {
 };
 
 export function defaultDesign(b, prompt) {
-  const recipe = getRecipe(b.recipe) ?? getRecipe("runner");
+  const recipe = b.fit !== "none" ? getRecipe(b.recipe) : null;
+  if (!recipe) {
+    return {
+      ...GameDesign.parse({
+        title: b.title, pitch: b.pitch || String(prompt).slice(0, 200), recipe: null, orientation: "portrait",
+        controls: { touch: "", keyboard: "", hint: "" },
+        coreLoop: b.coreActions || String(prompt).slice(0, 300),
+        entities: [{ name: "player", role: "player", description: `the player's piece for: ${String(prompt).slice(0, 160)}`, behavior: "", spawn: "", interaction: "", size: 52, needsSprite: true }],
+        rules: b.knownGame ? [`Implement the complete real rules of ${b.knownGame}.`] : [], scoring: [], lives: 3, progression: [], winCondition: null, loseCondition: "Lose the game",
+        tuning: {}, juice: [], background: { description: "", deco: "dots" }
+      }),
+      fit: "none", knownGame: b.knownGame ?? null, coreActions: b.coreActions ?? ""
+    };
+  }
   const code = recipeCode(recipe.id);
   // Entities the recipe spawns, plus art it draws itself with g.sprite("name")
   // (board, card and UI games draw instead of spawning).
@@ -145,7 +203,7 @@ export function defaultDesign(b, prompt) {
   drawn.push(...listed);
   const types = [...new Set(["player", ...spawned, ...drawn])].slice(0, 10);
   const structural = new Set(["gate", "platform", "bullet", "enemy_bullet", "brick", "paddle", "ball", "ground", "hook", "arrow", "shot", "orb", "slash", "bolt"]);
-  return GameDesign.parse({
+  return { fit: b.fit, knownGame: b.knownGame ?? null, coreActions: b.coreActions ?? "", ...GameDesign.parse({
     title: b.title, pitch: b.pitch || String(prompt).slice(0, 200), recipe: recipe.id, orientation: b.orientation,
     controls: { touch: "", keyboard: "", hint: "" },
     coreLoop: recipe.summary,
@@ -156,7 +214,7 @@ export function defaultDesign(b, prompt) {
     })),
     rules: [], scoring: [], lives: 3, progression: [], winCondition: null, loseCondition: "Lose all lives",
     tuning: {}, juice: [], background: { description: "", deco: "stars" }
-  });
+  }) };
 }
 
 // ------------------------------------------------------------ art director
